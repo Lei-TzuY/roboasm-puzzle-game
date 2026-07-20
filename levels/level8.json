@@ -1,0 +1,18 @@
+{
+  "name": "Level 8: Fibonaccier",
+  "description": "Read N from the Inbox (0,1). Generate the first N numbers of the Fibonacci sequence (starting with 1, 1, 2, 3, 5, 8...) and output them to the Outbox (4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    { "x": 0, "y": 1, "queue": [6] }
+  ],
+  "outboxes": [
+    { "x": 4, "y": 1 }
+  ],
+  "expected_output": [1, 1, 2, 3, 5, 8]
+}

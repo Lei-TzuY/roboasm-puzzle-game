@@ -1,0 +1,26 @@
+{
+  "name": "Level 6: The Vault",
+  "description": "Robot 0 must step on the Button (O) to open the Door (X). Robot 1 must use a CALL subroutine to SQUARE the numbers from the Inbox.",
+  "width": 6,
+  "height": 3,
+  "robots": [
+    { "x": 1, "y": 0, "facing": "E" },
+    { "x": 1, "y": 2, "facing": "E" }
+  ],
+  "inboxes": [
+    { "x": 0, "y": 2, "queue": [2, 3, 4] }
+  ],
+  "outboxes": [
+    { "x": 5, "y": 2 }
+  ],
+  "buttons": [
+    { "x": 3, "y": 0, "targets": [{"x": 3, "y": 2}] }
+  ],
+  "doors": [
+    { "x": 3, "y": 2 }
+  ],
+  "walls": [
+    { "x": 3, "y": 1 }
+  ],
+  "expected_output": [4, 9, 16]
+}

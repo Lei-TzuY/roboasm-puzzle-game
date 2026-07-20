@@ -1,0 +1,18 @@
+{
+  "name": "Level 11: Pattern Matcher",
+  "description": "Find the 0-indexed position of the target number 99 in the inbox sequence (0,1). Output this index to the Outbox (4,1). Hint: use a preprocessor macro like #define TARGET 99.",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    { "x": 0, "y": 1, "queue": [10, 5, 99, 12] }
+  ],
+  "outboxes": [
+    { "x": 4, "y": 1 }
+  ],
+  "expected_output": [2]
+}

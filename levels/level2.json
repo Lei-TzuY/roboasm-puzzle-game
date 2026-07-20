@@ -1,0 +1,25 @@
+{
+  "name": "Level 2: Doubler",
+  "description": "Read numbers from the Inbox (at 0,1), double them, and drop them in the Outbox (at 4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1, 2, 3]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [2, 4, 6]
+}

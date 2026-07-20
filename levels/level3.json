@@ -1,0 +1,25 @@
+{
+  "name": "Level 3: Zero Eliminator",
+  "description": "Read numbers from Inbox (0,1). Drop them in Outbox (4,1) ONLY if they are strictly positive. Discard zeros and negative numbers.",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1, -5, 3, 0, 8, -1]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [1, 3, 8]
+}

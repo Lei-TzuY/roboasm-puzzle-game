@@ -1,0 +1,16 @@
+{
+  "name": "Level 7: The Sorting Facility",
+  "description": "Boss Level! Inbox A produces numbers. Route positive numbers (>= 0) to Outbox A (right). Route negative numbers (< 0) to Outbox B (left). Hint: use CMP INV 0 and JLT.",
+  "width": 7,
+  "height": 3,
+  "robots": [
+    { "x": 3, "y": 1, "facing": "N" }
+  ],
+  "inboxes": [
+    { "x": 3, "y": 0, "queue": [5, -2, 8, -10, 0] }
+  ],
+  "outboxes": [
+    { "x": 6, "y": 1, "expected": [5, 8, 0] },
+    { "x": 0, "y": 1, "expected": [-2, -10] }
+  ]
+}

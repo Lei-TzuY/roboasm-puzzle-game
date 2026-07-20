@@ -1,0 +1,22 @@
+{
+  "name": "Level 1: Fetch",
+  "description": "Move forward, pick up the item, turn around, and drop it back at the start.",
+  "width": 5,
+  "height": 5,
+  "robot": {
+    "x": 0,
+    "y": 0,
+    "facing": "E"
+  },
+  "items": [
+    {"x": 2, "y": 0}
+  ],
+  "walls": [],
+  "win_conditions": [
+    {
+      "type": "item_at",
+      "x": 0,
+      "y": 0
+    }
+  ]
+}

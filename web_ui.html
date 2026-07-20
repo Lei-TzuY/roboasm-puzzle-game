@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RoboASM Web IDE</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #c9d1d9; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; }
+  h1 { padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; color: #58a6ff; font-size: 16px; display: flex; align-items: center; gap: 12px; }
+  h1 span.subtitle { color: #8b949e; font-size: 12px; font-weight: normal; }
+  #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #161b22; border-bottom: 1px solid #30363d; }
+  select { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; }
+  button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px 12px; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #30363d; }
+  button.primary { background: #238636; border-color: #2ea043; color: #fff; }
+  button.primary:hover { background: #2ea043; }
+  button.danger { background: #6e1b1b; border-color: #f85149; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #speed-label { color: #8b949e; font-size: 12px; }
+  #layout { display: flex; height: calc(100vh - 82px); overflow: hidden; }
+  #editor-panel { width: 280px; min-width: 200px; border-right: 1px solid #30363d; display: flex; flex-direction: column; }
+  #level-desc { padding: 8px 12px; background: #161b22; border-bottom: 1px solid #30363d; color: #e6a817; font-size: 11px; line-height: 1.5; min-height: 50px; }
+  #level-desc strong { color: #58a6ff; display: block; margin-bottom: 4px; }
+  #editor-wrapper { flex: 1; display: flex; overflow: hidden; }
+  #line-nums { padding: 6px 0 6px 6px; background: #161b22; color: #484f58; text-align: right; user-select: none; min-width: 32px; overflow: hidden; white-space: pre; line-height: 1.6; font-size: 13px; }
+  #code { flex: 1; background: #0d1117; color: #c9d1d9; border: none; outline: none; resize: none; padding: 6px 8px; line-height: 1.6; font-family: inherit; font-size: 13px; overflow-y: auto; white-space: pre; }
+  #code::selection { background: #264f78; }
+  #center-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px; overflow: auto; }
+  #grid-title { color: #8b949e; font-size: 11px; margin-bottom: 8px; }
+  #grid-canvas { border: 1px solid #30363d; image-rendering: pixelated; }
+  #legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 11px; color: #8b949e; }
+  .leg { display: flex; align-items: center; gap: 4px; }
+  .leg-box { width: 12px; height: 12px; border-radius: 2px; }
+  #state-panel { width: 220px; border-left: 1px solid #30363d; display: flex; flex-direction: column; overflow: auto; }
+  .state-section { padding: 8px 12px; border-bottom: 1px solid #21262d; }
+  .state-section h3 { color: #58a6ff; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+  .reg { display: flex; justify-content: space-between; padding: 2px 0; }
+  .reg .key { color: #7ee787; }
+  .reg .val { color: #ffa657; }
+  .flag { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  .flag.on { background: #0d4a2a; color: #7ee787; }
+  .flag.off { background: #21262d; color: #484f58; }
+  #inst-list { overflow: auto; flex: 1; }
+  .inst { padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+  .inst.active { background: #1c2a1c; color: #7ee787; }
+  .inst .pc { color: #484f58; display: inline-block; width: 24px; }
+  #output-bar { padding: 6px 16px; background: #161b22; border-top: 1px solid #30363d; font-size: 12px; min-height: 28px; }
+  .msg-ok  { color: #7ee787; }
+  .msg-err { color: #f85149; }
+  .msg-info{ color: #8b949e; }
+  #step-counter { color: #8b949e; font-size: 12px; }
+  .tab-bar { display: flex; border-bottom: 1px solid #30363d; background: #161b22; }
+  .tab { padding: 6px 14px; cursor: pointer; font-size: 12px; color: #8b949e; border-bottom: 2px solid transparent; }
+  .tab.active { color: #c9d1d9; border-bottom-color: #58a6ff; }
+  #robot-tabs { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
+  .robot-tab { padding: 3px 8px; border-radius: 4px; background: #21262d; font-size: 11px; cursor: pointer; }
+  .robot-tab.active { background: #0d4a2a; color: #7ee787; }
+</style>
+</head>
+<body>
+<h1>RoboASM <span class="subtitle">— Visual Assembly Debugger</span></h1>
+<div id="toolbar">
+  <select id="level-sel"></select>
+  <button class="primary" onclick="compileAndReset()">&#9654; Reset &amp; Compile</button>
+  <button id="btn-save" onclick="saveSolution()" style="background:#163d1e; border-color:#2ea043; color:#7ee787;">💾 Save</button>
+  <button id="btn-step" onclick="stepOnce()">&#9656; Step</button>
+  <button id="btn-run"  onclick="runAuto()">&#9654;&#9654; Run</button>
+  <button id="btn-stop" onclick="stopAuto()" disabled>&#9646;&#9646; Pause</button>
+  <span id="speed-label">Speed:</span>
+  <input type="range" id="speed" min="1" max="10" value="5" style="width:80px">
+  <span id="step-counter">Cycles: 0</span>
+  <button id="btn-toggle-editor" onclick="enterEditorMode()" style="background:#4a2b16; border-color:#d48416; color:#ffa657; margin-left: auto;">🛠️ Level Editor</button>
+</div>
+<div id="layout">
+  <div id="editor-palette-panel" style="display:none; width: 280px; border-right: 1px solid #30363d; flex-direction: column; background: #161b22; overflow-y: auto;">
+    <div class="state-section">
+      <h3>Level Properties</h3>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+        <label>Level Name:</label>
+        <input type="text" id="edit-level-name" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+        <label>Description:</label>
+        <textarea id="edit-level-desc" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px; resize:none; height:45px; font-family:inherit;"></textarea>
+        <div style="display:flex; gap:6px;">
+          <div style="flex:1;">
+            <label>Width:</label>
+            <input type="number" id="edit-level-width" min="3" max="15" style="width:100%; background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+          </div>
+          <div style="flex:1;">
+            <label>Height:</label>
+            <input type="number" id="edit-level-height" min="3" max="15" style="width:100%; background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+          </div>
+        </div>
+        <label>Filename (e.g. custom.json):</label>
+        <input type="text" id="edit-level-filename" placeholder="custom_level.json" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+      </div>
+    </div>
+    <div class="state-section">
+      <h3>Drawing Tools</h3>
+      <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px; margin-top:8px;" id="brush-buttons">
+        <button onclick="setBrush('wall')" style="padding:4px;" class="brush-btn" id="brush-wall">🧱 Wall</button>
+        <button onclick="setBrush('robot')" style="padding:4px;" class="brush-btn" id="brush-robot">🤖 Robot</button>
+        <button onclick="setBrush('inbox')" style="padding:4px;" class="brush-btn" id="brush-inbox">📥 Inbox</button>
+        <button onclick="setBrush('outbox')" style="padding:4px;" class="brush-btn" id="brush-outbox">📤 Outbox</button>
+        <button onclick="setBrush('conveyor')" style="padding:4px;" class="brush-btn" id="brush-conveyor">🔁 Conveyor</button>
+        <button onclick="setBrush('button')" style="padding:4px;" class="brush-btn" id="brush-button">◯ Button</button>
+        <button onclick="setBrush('door')" style="padding:4px;" class="brush-btn" id="brush-door">▓ Door</button>
+        <button onclick="setBrush('item')" style="padding:4px;" class="brush-btn" id="brush-item">💎 Item</button>
+        <button onclick="setBrush('eraser')" style="grid-column: span 2; padding:4px;" class="brush-btn" id="brush-eraser">🧹 Eraser</button>
+      </div>
+    </div>
+    <div class="state-section" id="brush-config" style="display:none; background:#1c2128;">
+      <h3>Brush Config</h3>
+      <div id="brush-config-fields" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
+    </div>
+    <div class="state-section" style="margin-top:auto; display:flex; flex-direction:column; gap:6px; padding:12px;">
+      <button class="primary" onclick="saveCustomLevel()">💾 Save Level</button>
+      <button onclick="exitEditorMode()" style="background:#5e1c1c; border-color:#f85149; color:#fff;">❌ Exit Editor</button>
+    </div>
+  </div>
+  <div id="editor-panel">
+    <div id="level-desc"><strong>Select a level to begin</strong></div>
+    <div id="editor-wrapper">
+      <div id="line-nums">1</div>
+      <textarea id="code" spellcheck="false" placeholder="; Enter assembly code here&#10;; e.g.:&#10;MOVE&#10;PICK&#10;TURN R&#10;TURN R&#10;MOVE&#10;DROP"></textarea>
+    </div>
+  </div>
+  <div id="center-panel">
+    <div id="grid-title">Grid</div>
+    <canvas id="grid-canvas" width="300" height="300"></canvas>
+    <div id="legend">
+      <div class="leg"><div class="leg-box" style="background:#2ea043"></div>Robot</div>
+      <div class="leg"><div class="leg-box" style="background:#4d88ff"></div>Item</div>
+      <div class="leg"><div class="leg-box" style="background:#ffa657"></div>Inbox</div>
+      <div class="leg"><div class="leg-box" style="background:#8957e5"></div>Outbox</div>
+      <div class="leg"><div class="leg-box" style="background:#30363d"></div>Wall</div>
+      <div class="leg"><div class="leg-box" style="background:#0d4a2a"></div>Conveyor</div>
+      <div class="leg"><div class="leg-box" style="background:#162e2d; border:1px solid #58a6ff; display:flex; align-items:center; justify-content:center; color:#58a6ff; font-size:10px; font-weight:bold;">◯</div>Button</div>
+      <div class="leg"><div class="leg-box" style="background:#4a1515; border:1px solid #f85149; display:flex; align-items:center; justify-content:center; color:#f85149; font-size:10px; font-weight:bold;">▓</div>Door (Closed)</div>
+      <div class="leg"><div class="leg-box" style="background:#1a2216; border:1px dashed #7ee787; display:flex; align-items:center; justify-content:center; color:#7ee787; font-size:10px; font-weight:bold;">◌</div>Door (Open)</div>
+    </div>
+  </div>
+  <div id="state-panel">
+    <div id="robot-tabs"></div>
+    <div class="state-section">
+      <h3>Registers</h3>
+      <div id="regs"></div>
+    </div>
+    <div class="state-section">
+      <h3>Flags</h3>
+      <div id="flags"></div>
+    </div>
+    <div class="state-section">
+      <h3>Inventory</h3>
+      <div id="inv" style="color:#ffa657">[ Empty ]</div>
+    </div>
+    <div class="state-section">
+      <h3>Position &amp; Facing</h3>
+      <div id="pos" class="reg"></div>
+    </div>
+    <div class="state-section" id="chart-section" style="display:none;">
+      <h3>Performance History</h3>
+      <div id="chart-container" style="margin-top: 5px;"></div>
+    </div>
+    <div class="state-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <h3>Instructions</h3>
+      <div id="inst-list"></div>
+    </div>
+  </div>
+</div>
+<div id="output-bar"><span id="msg" class="msg-info">Ready. Select a level and press Reset &amp; Compile.</span></div>
+
+<script>
+// ─── Embedded Level Data ───────────────────────────────────────────────────
+let LEVELS = [
+  {"name":"Level 1: Fetch","description":"Move forward, pick up the item, turn around, and drop it back at the start.","width":5,"height":5,"robot":{"x":0,"y":0,"facing":"E"},"items":[{"x":2,"y":0}],"walls":[],"win_conditions":[{"type":"item_at","x":0,"y":0}],"filename":"level1.json"},
+  {"name":"Level 2: Doubler","description":"Read numbers from the Inbox (at 0,1), double them, and drop them in the Outbox (at 4,1).","width":5,"height":3,"robot":{"x":2,"y":1,"facing":"W"},"inboxes":[{"x":0,"y":1,"queue":[1,2,3]}],"outboxes":[{"x":4,"y":1}],"expected_output":[2,4,6],"filename":"level2.json"},
+  {"name":"Level 3: Zero Eliminator","description":"Read numbers from Inbox (0,1). Drop them in Outbox (4,1) ONLY if they are strictly positive. Discard zeros and negatives.","width":5,"height":3,"robot":{"x":2,"y":1,"facing":"W"},"inboxes":[{"x":0,"y":1,"queue":[1,-5,3,0,8,-1]}],"outboxes":[{"x":4,"y":1}],"expected_output":[1,3,8],"filename":"level3.json"},
+  {"name":"Level 4: The Factory Line","description":"The Outbox is blocked by walls. Drop items onto the conveyor belt to deliver them.","width":5,"height":4,"robot":{"x":2,"y":1,"facing":"W"},"inboxes":[{"x":0,"y":1,"queue":[1,2,3]}],"outboxes":[{"x":4,"y":3}],"conveyors":[{"x":4,"y":1,"dir":"S"},{"x":4,"y":2,"dir":"S"}],"walls":[{"x":3,"y":2},{"x":3,"y":3},{"x":4,"y":0}],"expected_output":[1,2,3],"filename":"level4.json"},
+  {"name":"Level 5: The Relay","description":"Two robots! Robot 0 is by the Inbox, Robot 1 is by the Outbox. They both run the SAME code. Use the X register to branch differently.","width":7,"height":3,"robots":[{"x":1,"y":1,"facing":"W"},{"x":5,"y":1,"facing":"W"}],"inboxes":[{"x":0,"y":1,"queue":[5,10,15]}],"outboxes":[{"x":6,"y":1}],"conveyors":[{"x":2,"y":1,"dir":"E"},{"x":3,"y":1,"dir":"E"},{"x":4,"y":1,"dir":"E"}],"walls":[{"x":2,"y":0},{"x":3,"y":0},{"x":4,"y":0},{"x":2,"y":2},{"x":3,"y":2},{"x":4,"y":2}],"expected_output":[5,10,15],"filename":"level5.json"},
+  {"name":"Level 6: The Vault","description":"Robot 0 must step on the Button (O) to open the Door (X). Robot 1 must use a CALL subroutine to SQUARE the numbers from the Inbox.","width":6,"height":3,"robots":[{"x":1,"y":0,"facing":"E"},{"x":1,"y":2,"facing":"E"}],"inboxes":[{"x":0,"y":2,"queue":[2,3,4]}],"outboxes":[{"x":5,"y":2}],"buttons":[{"x":3,"y":0,"targets":[{"x":3,"y":2}]}],"doors":[{"x":3,"y":2}],"walls":[{"x":3,"y":1}],"expected_output":[4,9,16],"filename":"level6.json"},
+  {"name":"Level 7: The Sorting Facility","description":"Boss Level! Inbox A produces numbers. Route positive numbers (>= 0) to Outbox A (right). Route negative numbers (< 0) to Outbox B (left). Hint: use CMP INV 0 and JLT.","width":7,"height":3,"robots":[{"x":3,"y":1,"facing":"N"}],"inboxes":[{"x":3,"y":0,"queue":[5,-2,8,-10,0]}],"outboxes":[{"x":6,"y":1,"expected":[5,8,0]},{"x":0,"y":1,"expected":[-2,-10]}],"filename":"level7.json"},
+  {"name":"Level 8: Fibonaccier","description":"Read N from the Inbox (0,1). Generate the first N numbers of the Fibonacci sequence (starting with 1, 1, 2, 3, 5, 8...) and output them to the Outbox (4,1).","width":5,"height":3,"robot":{"x":2,"y":1,"facing":"W"},"inboxes":[{"x":0,"y":1,"queue":[6]}],"outboxes":[{"x":4,"y":1}],"expected_output":[1,1,2,3,5,8],"filename":"level8.json"},
+  {"name":"Level 9: Prime Tester","description":"Read numbers from the Inbox (0,1). Determine if each number is Prime. Output 1 if it is prime, and 0 if it is not (including numbers <= 1). Output to the Outbox (4,1).","width":5,"height":3,"robot":{"x":2,"y":1,"facing":"W"},"inboxes":[{"x":0,"y":1,"queue":[2,4,7,15,1]}],"outboxes":[{"x":4,"y":1}],"expected_output":[1,0,1,0,0],"filename":"level9.json"},
+  {"name":"Level 10: Maze Explorer","description":"Navigate the maze grid. Move from start (0,0) around obstacles to pick up the key item at (4,4), and deliver it to the Outbox at (0,4).","width":5,"height":5,"robot":{"x":0,"y":0,"facing":"E"},"items":[{"x":4,"y":4,"value":99}],"walls":[{"x":0,"y":1}, {"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 4, "y": 1}, {"x": 0, "y": 3}, {"x": 2, "y": 3}, {"x": 3, "y": 3}, {"x": 4, "y": 3}],"outboxes":[{"x":0,"y":4}],"expected_output":[99],"filename":"level10.json"}
+];
+
+// ─── Lexer ─────────────────────────────────────────────────────────────────
+function lex(src) {
+  const lines = src.split('\n');
+  const tokens = [];
+  lines.forEach((raw, i) => {
+    const line = raw.split(/\/\/|;|#/)[0].trim();
+    if (!line) return;
+    const parts = line.split(/\s+/);
+    tokens.push({ parts, line_num: i + 1 });
+  });
+  return tokens;
+}
+
+// ─── Assembler ─────────────────────────────────────────────────────────────
+function assemble(tokens) {
+  // Pass 0: Find macros and substitute them
+  const macros = {};
+  let filteredTokens = [];
+  for (const t of tokens) {
+    const parts = t.parts;
+    if (parts[0].toLowerCase() === '#define' || parts[0].toLowerCase() === '@define') {
+      if (parts.length >= 3) {
+        macros[parts[1]] = parts[2];
+      }
+      continue;
+    }
+    filteredTokens.push(t);
+  }
+
+  // Substitute macros in arguments
+  for (const t of filteredTokens) {
+    t.parts = t.parts.map(part => part in macros ? macros[part] : part);
+  }
+  tokens = filteredTokens;
+
+  const labels = {};
+  let idx = 0;
+  for (const t of tokens) {
+    const parts = t.parts;
+    if (parts[0].endsWith(':')) { labels[parts[0].slice(0,-1)] = idx; if (parts.length > 1) idx++; }
+    else idx++;
+  }
+  const instructions = [];
+  for (const t of tokens) {
+    let parts = t.parts;
+    if (parts[0].endsWith(':')) { if (parts.length === 1) continue; parts = parts.slice(1); }
+    const opcode = parts[0].toUpperCase();
+    const args = parts.slice(1).map(a => {
+      if (a in labels) return labels[a];
+      const n = parseInt(a);
+      return isNaN(n) ? a.toUpperCase() : n;
+    });
+    instructions.push({ opcode, args, line_num: t.line_num });
+  }
+  return instructions;
+}
+
+// ─── Grid ──────────────────────────────────────────────────────────────────
+class Grid {
+  constructor(def) {
+    this.width  = def.width;
+    this.height = def.height;
+    this.items    = {};
+    this.walls    = new Set((def.walls||[]).map(w=>`${w.x},${w.y}`));
+    this.inboxes  = {};
+    this.outboxes = {};
+    this.conveyors= {};
+    this.buttons  = {};
+    this.doors    = new Set((def.doors||[]).map(d=>`${d.x},${d.y}`));
+    this.openDoors = new Set();
+    (def.items||[]).forEach(it=>{ this.items[`${it.x},${it.y}`] = it.value ?? 0; });
+    (def.inboxes||[]).forEach(ib=>{ this.inboxes[`${ib.x},${ib.y}`] = [...ib.queue]; });
+    (def.outboxes||[]).forEach(ob=>{ this.outboxes[`${ob.x},${ob.y}`] = []; });
+    (def.conveyors||[]).forEach(cv=>{ this.conveyors[`${cv.x},${cv.y}`] = cv.dir; });
+    (def.buttons||[]).forEach(btn=>{ this.buttons[`${btn.x},${btn.y}`] = (btn.targets||[]).map(t=>`${t.x},${t.y}`); });
+  }
+  isWall(x,y) { 
+    if (x<0||y<0||x>=this.width||y>=this.height) return true;
+    const k = `${x},${y}`;
+    if (this.walls.has(k)) return true;
+    if (this.doors.has(k) && !this.openDoors.has(k)) return true;
+    return false; 
+  }
+  hasItem(x,y) { const k=`${x},${y}`; return k in this.items || (k in this.inboxes && this.inboxes[k].length>0); }
+  removeItem(x,y) {
+    const k=`${x},${y}`;
+    if (k in this.items) { const v=this.items[k]; delete this.items[k]; return [true,v]; }
+    if (k in this.inboxes && this.inboxes[k].length>0) return [true, this.inboxes[k].shift()];
+    return [false,null];
+  }
+  dropItem(x,y,val) {
+    const k=`${x},${y}`;
+    if (k in this.outboxes) { this.outboxes[k].push(val); return true; }
+    this.items[k]=val; return true;
+  }
+  tick(robots) {
+    const moves=[];
+    for (const [k,val] of Object.entries(this.items)) {
+      if (k in this.conveyors) {
+        const [x,y]=k.split(',').map(Number);
+        const d=this.conveyors[k];
+        let nx=x,ny=y;
+        if(d==='N')ny--;else if(d==='S')ny++;else if(d==='E')nx++;else if(d==='W')nx--;
+        if(!this.isWall(nx,ny)) moves.push([k,nx,ny,val]);
+      }
+    }
+    moves.forEach(([k])=>delete this.items[k]);
+    moves.forEach(([,nx,ny,val])=>this.dropItem(nx,ny,val));
+
+    this.openDoors.clear();
+    const robotCoords = new Set((robots||[]).map(r => `${r.x},${r.y}`));
+    for (const [bk, targets] of Object.entries(this.buttons)) {
+      if (bk in this.items || robotCoords.has(bk)) {
+        targets.forEach(tk => this.openDoors.add(tk));
+      }
+    }
+  }
+}
+
+// ─── Robot ─────────────────────────────────────────────────────────────────
+class Robot {
+  constructor(cfg) {
+    this.x=cfg.x; this.y=cfg.y; this.facing=cfg.facing;
+    this.inventory=null;
+    this.registers={R0:0,R1:0,R2:0,R3:0};
+    this.flags={ZERO:false,NEGATIVE:false};
+    this.pc=0; this.halted=false; this.error=null;
+    this.callStack=[];
+  }
+  getVal(a) {
+    if(typeof a==='number') return a;
+    if(a==='INV'){ if(this.inventory===null) throw new Error('INV is empty'); return this.inventory; }
+    if(a==='X') return this.x;
+    if(a==='Y') return this.y;
+    if(a in this.registers) return this.registers[a];
+    throw new Error(`Unknown arg: ${a}`);
+  }
+  setVal(a,v) {
+    if(a==='INV') this.inventory=v;
+    else if(a in this.registers) this.registers[a]=v;
+    else throw new Error(`Cannot set ${a}`);
+  }
+  step(instructions, grid) {
+    if(this.halted||this.pc>=instructions.length){this.halted=true;return;}
+    const {opcode,args}=instructions[this.pc];
+    try {
+      switch(opcode) {
+        case 'MOV': this.setVal(args[1],this.getVal(args[0])); break;
+        case 'ADD': this.setVal(args[1],this.getVal(args[0])+this.getVal(args[1])); break;
+        case 'SUB': this.setVal(args[1],this.getVal(args[1])-this.getVal(args[0])); break;
+        case 'MUL': this.setVal(args[1],this.getVal(args[0])*this.getVal(args[1])); break;
+        case 'DIV': {
+          const divisor = this.getVal(args[0]);
+          if (divisor === 0) throw new Error('Division by zero');
+          this.setVal(args[1], Math.floor(this.getVal(args[1]) / divisor));
+          break;
+        }
+        case 'MOD': {
+          const divisor = this.getVal(args[0]);
+          if (divisor === 0) throw new Error('Modulo by zero');
+          this.setVal(args[1], this.getVal(args[1]) % divisor);
+          break;
+        }
+        case 'CMP': { const d=this.getVal(args[0])-this.getVal(args[1]); this.flags.ZERO=(d===0); this.flags.NEGATIVE=(d<0); break; }
+        case 'JMP': this.pc=args[0]; return;
+        case 'JEQ': if(this.flags.ZERO){this.pc=args[0];return;} break;
+        case 'JNE': if(!this.flags.ZERO){this.pc=args[0];return;} break;
+        case 'JLT': if(this.flags.NEGATIVE){this.pc=args[0];return;} break;
+        case 'JGT': if(!this.flags.ZERO&&!this.flags.NEGATIVE){this.pc=args[0];return;} break;
+        case 'CALL': {
+          this.callStack.push(this.pc + 1);
+          this.pc = args[0];
+          return;
+        }
+        case 'RET': {
+          if (this.callStack.length === 0) throw new Error("Empty call stack");
+          this.pc = this.callStack.pop();
+          return;
+        }
+        case 'MOVE': {
+          let nx=this.x,ny=this.y;
+          if(this.facing==='N')ny--;else if(this.facing==='S')ny++;else if(this.facing==='E')nx++;else if(this.facing==='W')nx--;
+          if(!grid.isWall(nx,ny)){this.x=nx;this.y=ny;}
+          break;
+        }
+        case 'TURN': {
+          const dirs=['N','E','S','W']; const i=dirs.indexOf(this.facing);
+          if(args[0]==='L'||args[0]==='LEFT') this.facing=dirs[(i+3)%4];
+          else this.facing=dirs[(i+1)%4];
+          break;
+        }
+        case 'PICK': {
+          if(this.inventory===null){
+            const [ok,v]=grid.removeItem(this.x,this.y);
+            if(ok) this.inventory=v; else throw new Error('Nothing to pick here');
+          } break;
+        }
+        case 'DROP': {
+          if(this.inventory!==null){
+            grid.dropItem(this.x,this.y,this.inventory);
+            this.inventory=null;
+          } break;
+        }
+        case 'HLT': this.halted=true; return;
+        case 'NOP': break;
+        default: throw new Error(`Unknown opcode: ${opcode}`);
+      }
+      this.pc++;
+    } catch(e) { this.halted=true; this.error=e.message; throw e; }
+  }
+}
+
+// ─── VM ───────────────────────────────────────────────────────────────────
+class VM {
+  constructor(instructions, levelDef) {
+    this.instructions=instructions;
+    this.grid=new Grid(levelDef);
+    const robotsCfg = levelDef.robots || (levelDef.robot ? [levelDef.robot] : [{x:0,y:0,facing:'N'}]);
+    this.robots=robotsCfg.map(c=>new Robot(c));
+    this.halted=false;
+    this.cycles=0;
+    this.levelDef=levelDef;
+  }
+  get halted() { return this._halted; }
+  set halted(v) { this._halted=v; }
+  step() {
+    if(this._halted) return;
+    for(const r of this.robots) { if(!r.halted) { try { r.step(this.instructions,this.grid); } catch(e){} } }
+    this.grid.tick(this.robots);
+    this.cycles++;
+    if(this.robots.every(r=>r.pc>=this.instructions.length||r.halted)) this._halted=true;
+  }
+  checkWin() {
+    const def=this.levelDef;
+    if(def.win_conditions) {
+      for(const wc of def.win_conditions) {
+        if(wc.type==='item_at') { if(!((`${wc.x},${wc.y}`) in this.grid.items)) return[false,'Item not at target position']; }
+      }
+      return[true,'Level Complete!'];
+    }
+    
+    // Check if any outbox has "expected" output list (like in Level 7)
+    const hasExpectedOutboxes = def.outboxes && def.outboxes.some(ob => ob.expected !== undefined);
+    
+    if (hasExpectedOutboxes) {
+      for (const ob of def.outboxes) {
+        if (ob.expected === undefined) continue;
+        const key = `${ob.x},${ob.y}`;
+        const actual = this.grid.outboxes[key] || [];
+        const expected = ob.expected;
+        if (actual.length < expected.length) {
+          return [false, `Waiting for output at [${ob.x},${ob.y}]...`];
+        } else if (actual.length > expected.length) {
+          return [false, `Too much output at [${ob.x},${ob.y}].`];
+        }
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+          return [false, `Mismatch at [${ob.x},${ob.y}]. Expected: [${expected}], got: [${actual}]`];
+        }
+      }
+      return [true, 'Level Complete! All outputs match perfectly!'];
+    }
+    
+    if(!def.outboxes||def.outboxes.length===0) return[true,'No outbox required'];
+    const ob=def.outboxes[0];
+    const actual=this.grid.outboxes[`${ob.x},${ob.y}`]||[];
+    const expected=def.expected_output||[];
+    if(JSON.stringify(actual)===JSON.stringify(expected)) return[true,'Level Complete! Output matches.'];
+    return[false,`Output: [${actual}] — Expected: [${expected}]`];
+  }
+}
+
+// ─── State ────────────────────────────────────────────────────────────────
+let vm=null, instructions=[], autoTimer=null, selectedRobot=0, currentLevel=0;
+let userProfile={};
+let isAnimating = false;
+let animStartTime = 0;
+let animDuration = 150;
+let prevRobotsState = [];
+let targetRobotsState = [];
+let isAutoPaused = false;
+let animationFrameId = null;
+
+function getAngleForFacing(facing) {
+  if (facing === 'N') return 0;
+  if (facing === 'E') return Math.PI / 2;
+  if (facing === 'S') return Math.PI;
+  if (facing === 'W') return -Math.PI / 2;
+  return 0;
+}
+
+// ─── UI helpers ──────────────────────────────────────────────────────────
+function setMsg(text,cls='msg-info') {
+  const el=document.getElementById('msg');
+  el.className=cls; el.textContent=text;
+}
+
+function updateLineNums() {
+  const ta=document.getElementById('code');
+  const lines=ta.value.split('\n').length;
+  document.getElementById('line-nums').textContent=Array.from({length:lines},(_,i)=>i+1).join('\n');
+}
+
+function updateState() {
+  if(!vm) return;
+  const r=vm.robots[selectedRobot];
+  // Registers
+  document.getElementById('regs').innerHTML=Object.entries(r.registers)
+    .map(([k,v])=>`<div class="reg"><span class="key">${k}</span><span class="val">${v}</span></div>`).join('');
+  // Flags
+  document.getElementById('flags').innerHTML=Object.entries(r.flags)
+    .map(([k,v])=>`<span class="flag ${v?'on':'off'}">${k}</span>`).join('');
+  // Inventory
+  document.getElementById('inv').textContent = r.inventory!==null ? `[ ${r.inventory} ]` : '[ Empty ]';
+  // Position
+  document.getElementById('pos').innerHTML=
+    `<span class="key">X,Y</span><span class="val">${r.x}, ${r.y}</span>
+     <span class="key" style="margin-left:8px">DIR</span><span class="val">${r.facing}</span>
+     <span class="key" style="margin-left:8px">PC</span><span class="val">${r.pc}</span>`;
+  // Instructions
+  const il=document.getElementById('inst-list');
+  const start=Math.max(0,r.pc-3);
+  const end=Math.min(instructions.length,r.pc+6);
+  il.innerHTML=instructions.slice(start,end).map((ins,i)=>{
+    const absIdx=start+i;
+    const active=absIdx===r.pc?'active':'';
+    const argStr=ins.args.map(a=>typeof a==='number'?a:a).join(' ');
+    return `<div class="inst ${active}"><span class="pc">${absIdx.toString().padStart(2,'0')}</span> ${ins.opcode} ${argStr}</div>`;
+  }).join('');
+  // Robot tabs
+  document.getElementById('robot-tabs').innerHTML=vm.robots.map((_,i)=>
+    `<span class="robot-tab ${i===selectedRobot?'active':''}" onclick="selectRobot(${i})">Robot ${i}</span>`
+  ).join('');
+  // Step counter
+  document.getElementById('step-counter').textContent=`Cycles: ${vm.cycles}`;
+}
+
+function selectRobot(i) { selectedRobot=i; updateState(); drawGrid(1.0); }
+
+// ─── Grid Renderer ────────────────────────────────────────────────────────
+const TILE=48, PAD=6;
+const DIRS={'N':'↑','S':'↓','E':'→','W':'←'};
+
+function drawGrid(progress = 1.0) {
+  if(!vm) return;
+  const g=vm.grid, canvas=document.getElementById('grid-canvas');
+  const W=g.width*TILE+PAD*2, H=g.height*TILE+PAD*2;
+  canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+
+  for(let x=0;x<g.width;x++) for(let y=0;y<g.height;y++) {
+    const px=PAD+x*TILE, py=PAD+y*TILE;
+    const k=`${x},${y}`;
+    let bg='#161b22';
+    if(g.walls.has(k)) bg='#30363d';
+    else if(k in g.conveyors) bg='#0d4a2a';
+    else if(k in g.inboxes) bg='#2d1e00';
+    else if(k in g.outboxes) bg='#1e0d40';
+    else if(g.doors.has(k)) bg = g.openDoors.has(k) ? '#1a2216' : '#4a1515';
+    else if(k in g.buttons) bg = '#162e2d';
+    ctx.fillStyle=bg; ctx.fillRect(px+1,py+1,TILE-2,TILE-2);
+    ctx.strokeStyle='#21262d'; ctx.lineWidth=1; ctx.strokeRect(px+0.5,py+0.5,TILE-1,TILE-1);
+
+    if(g.walls.has(k)) { ctx.fillStyle='#484f58'; ctx.font='bold 18px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('#',px+TILE/2,py+TILE/2); }
+    if(g.doors.has(k)) {
+      const isOpen = g.openDoors.has(k);
+      ctx.fillStyle = isOpen ? '#7ee787' : '#f85149';
+      ctx.font='bold 18px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(isOpen ? '◌' : '▓',px+TILE/2,py+TILE/2);
+    }
+    if(k in g.buttons) {
+      ctx.fillStyle='#58a6ff'; ctx.font='bold 16px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('◯',px+TILE/2,py+TILE/2);
+    }
+    if(k in g.conveyors) { ctx.fillStyle='#7ee787'; ctx.font='18px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(DIRS[g.conveyors[k]]||'?',px+TILE/2,py+TILE/2); }
+    if(k in g.inboxes) { ctx.fillStyle='#ffa657'; ctx.font='10px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(`IN[${(g.inboxes[k]||[]).join(',')}]`,px+TILE/2,py+TILE/2); }
+    if(k in g.outboxes) { 
+      const ob = vm.levelDef.outboxes.find(o=>`${o.x},${o.y}`===k);
+      const expectedText = ob && ob.expected ? ` (${ob.expected.join(',')})` : '';
+      ctx.fillStyle='#8957e5'; ctx.font='9px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle'; 
+      ctx.fillText(`OUT[${(g.outboxes[k]||[]).join(',')}]${expectedText}`,px+TILE/2,py+TILE/2); 
+    }
+    if(k in g.items) {
+      ctx.fillStyle='#1f3a6e'; ctx.fillRect(px+8,py+8,TILE-16,TILE-16);
+      ctx.fillStyle='#4d88ff'; ctx.font='bold 14px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String(g.items[k]),px+TILE/2,py+TILE/2);
+    }
+  }
+
+  const drawRobots = isAnimating ? targetRobotsState : vm.robots;
+  
+  drawRobots.forEach((r, i) => {
+    let rx = r.x;
+    let ry = r.y;
+    let angle = getAngleForFacing(r.facing);
+    
+    if (isAnimating && prevRobotsState[i]) {
+      const prev = prevRobotsState[i];
+      rx = prev.x + (r.x - prev.x) * progress;
+      ry = prev.y + (r.y - prev.y) * progress;
+      
+      let prevAngle = getAngleForFacing(prev.facing);
+      let diff = angle - prevAngle;
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      angle = prevAngle + diff * progress;
+    }
+    
+    const px=PAD+rx*TILE, py=PAD+ry*TILE;
+    const isSelected=i===selectedRobot;
+    
+    // Draw base
+    ctx.fillStyle = r.halted ? '#6e1b1b' : (isSelected ? '#2ea043' : '#1a6632');
+    ctx.beginPath();
+    ctx.roundRect(px+4, py+4, TILE-8, TILE-8, 6);
+    ctx.fill();
+    
+    // Draw rotated direction indicator
+    ctx.save();
+    ctx.translate(px + TILE/2, py + TILE/2);
+    ctx.rotate(angle);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 16px Consolas';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('↑', 0, -2);
+    ctx.restore();
+    
+    // Label
+    ctx.fillStyle='#fff';
+    ctx.font='9px Consolas';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(`R${i}`, px+TILE/2, py+TILE/2+10);
+    
+    if(r.inventory!==null) {
+      ctx.fillStyle='#ffa657';
+      ctx.font='bold 9px Consolas';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(`[${r.inventory}]`, px+TILE/2, py+6);
+    }
+  });
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────
+async function loadLevel(idx) {
+  currentLevel=idx;
+  const def=LEVELS[idx];
+  document.getElementById('level-desc').innerHTML=`<strong>${def.name}</strong>${def.description}`;
+  vm=null; instructions=[];
+  document.getElementById('inst-list').innerHTML='';
+  document.getElementById('regs').innerHTML='';
+  document.getElementById('flags').innerHTML='';
+  document.getElementById('inv').textContent='[ Empty ]';
+  document.getElementById('pos').innerHTML='';
+  
+  if (window.location.protocol.startsWith('http') && def.filename) {
+    try {
+      const res = await fetch(`/api/solutions?level=${encodeURIComponent(def.filename)}`);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('code').value = data.code || '';
+      } else {
+        document.getElementById('code').value = '';
+      }
+    } catch(e) {
+      console.warn("Failed to load solution from server:", e);
+      document.getElementById('code').value = '';
+    }
+  } else {
+    document.getElementById('code').value = '';
+  }
+  updateLineNums();
+  drawGrid(1.0);
+  const hist = (def && def.filename && userProfile[def.filename] && userProfile[def.filename].history) || [];
+  renderHistoryChart(hist);
+}
+
+async function saveSolution() {
+  const def = LEVELS[currentLevel];
+  if (!def || !def.filename) {
+    setMsg("Offline mode or no level loaded. Cannot save.", "msg-err");
+    return;
+  }
+  if (!window.location.protocol.startsWith('http')) {
+    setMsg("Running offline. Connect to server to save solutions.", "msg-err");
+    return;
+  }
+  const code = document.getElementById('code').value;
+  try {
+    const res = await fetch('/api/solutions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: def.filename, code })
+    });
+    if (res.ok) {
+      setMsg("Solution saved successfully!", "msg-ok");
+    } else {
+      setMsg("Failed to save solution on server.", "msg-err");
+    }
+  } catch(e) {
+    setMsg(`Error saving: ${e.message}`, "msg-err");
+  }
+}
+
+async function saveProfileScore(cycles, size) {
+  const def = LEVELS[currentLevel];
+  if (window.location.protocol.startsWith('http') && def.filename) {
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: def.filename, cycles, size })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        userProfile = data.profile;
+        updateLevelSelector();
+        const hist = (def.filename && userProfile[def.filename] && userProfile[def.filename].history) || [];
+        renderHistoryChart(hist);
+        if (data.new_record) {
+          setMsg(`★ Level Complete! NEW RECORD: ${cycles} cycles, ${size} instructions!`, 'msg-ok');
+        }
+      }
+    } catch(e) {
+      console.warn("Could not save profile record to server:", e);
+    }
+  }
+}
+
+function compileAndReset() {
+  stopAuto();
+  const src=document.getElementById('code').value;
+  try {
+    const tokens=lex(src);
+    if(!tokens.length){ setMsg('No instructions to compile.','msg-err'); return; }
+    instructions=assemble(tokens);
+    vm=new VM(instructions,LEVELS[currentLevel]);
+    selectedRobot=0;
+    drawGrid(1.0); updateState();
+    setMsg(`Compiled ${instructions.length} instruction(s). Press Step or Run.`,'msg-info');
+    document.getElementById('btn-step').disabled=false;
+    document.getElementById('btn-run').disabled=false;
+  } catch(e) { setMsg(`Compile error: ${e.message}`,'msg-err'); }
+}
+
+function stepOnce() {
+  if(!vm){ setMsg('Compile first.','msg-err'); return; }
+  if(vm._halted){ setMsg('VM halted. Press Reset & Compile to restart.','msg-info'); return; }
+  if(isAnimating) return;
+  startStepWithAnimation();
+}
+
+function runAuto() {
+  if(!vm) { setMsg('Compile first.','msg-err'); return; }
+  document.getElementById('btn-stop').disabled=false;
+  document.getElementById('btn-run').disabled=true;
+  isAutoPaused = false;
+  
+  function getSpeedDelay() {
+    const speedVal = parseInt(document.getElementById('speed').value);
+    return Math.max(0, 500 - speedVal * 50);
+  }
+  
+  function runNext() {
+    if (vm._halted || isAutoPaused) {
+      stopAuto();
+      return;
+    }
+    
+    startStepWithAnimation();
+    
+    const delay = getSpeedDelay();
+    autoTimer = setTimeout(() => {
+      function checkAnim() {
+        if (!isAnimating) {
+          runNext();
+        } else {
+          autoTimer = setTimeout(checkAnim, 10);
+        }
+      }
+      checkAnim();
+    }, animDuration + delay);
+  }
+  
+  runNext();
+}
+
+function stopAuto() {
+  isAutoPaused = true;
+  if(autoTimer){ clearTimeout(autoTimer); autoTimer=null; }
+  if(animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId=null; }
+  isAnimating = false;
+  document.getElementById('btn-stop').disabled=true;
+  document.getElementById('btn-run').disabled=false;
+}
+
+function startStepWithAnimation() {
+  if (!vm || vm._halted) return;
+  
+  // Capture state before step
+  prevRobotsState = vm.robots.map(r => ({
+    x: r.x,
+    y: r.y,
+    facing: r.facing,
+    inventory: r.inventory,
+    halted: r.halted
+  }));
+  
+  vm.step();
+  
+  // Capture state after step
+  targetRobotsState = vm.robots.map(r => ({
+    x: r.x,
+    y: r.y,
+    facing: r.facing,
+    inventory: r.inventory,
+    halted: r.halted
+  }));
+  
+  isAnimating = true;
+  animStartTime = performance.now();
+  
+  // Speed slider 1-10 -> animation duration 40ms to 320ms
+  const speedVal = parseInt(document.getElementById('speed').value);
+  animDuration = Math.max(40, 320 - speedVal * 28);
+  
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+  animateTransition();
+}
+
+function animateTransition() {
+  const now = performance.now();
+  let progress = (now - animStartTime) / animDuration;
+  if (progress >= 1.0) {
+    progress = 1.0;
+    isAnimating = false;
+    drawGrid(1.0);
+    updateState();
+    
+    const [won,msg]=vm.checkWin();
+    if(won) { 
+      stopAuto(); 
+      setMsg(`★ ${msg} — ${vm.cycles} cycles, ${instructions.length} instructions.`, 'msg-ok'); 
+      saveProfileScore(vm.cycles, instructions.length);
+    }
+    else if(vm._halted) { 
+      stopAuto(); 
+      const r=vm.robots.find(r=>r.error); 
+      setMsg('Program halted. '+(r?r.error:''),'msg-err'); 
+    }
+    return;
+  }
+  
+  drawGrid(progress);
+  animationFrameId = requestAnimationFrame(animateTransition);
+}
+
+function updateLevelSelector() {
+  sel.innerHTML = '';
+  LEVELS.forEach((l,i)=>{ 
+    const o=document.createElement('option'); 
+    o.value=i; 
+    let text = l.name;
+    if (l.filename && userProfile[l.filename]) {
+      const best = userProfile[l.filename];
+      text += ` (Best: ${best.best_cycles}c / ${best.best_size}i)`;
+    }
+    o.textContent=text; 
+    sel.appendChild(o); 
+  });
+  sel.value = currentLevel;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+const sel=document.getElementById('level-sel');
+document.getElementById('code').addEventListener('input',updateLineNums);
+document.getElementById('code').addEventListener('scroll',()=>{
+  document.getElementById('line-nums').scrollTop=document.getElementById('code').scrollTop;
+});
+document.getElementById('speed').addEventListener('change',()=>{
+  if(autoTimer && !isAutoPaused){ stopAuto(); runAuto(); }
+});
+
+function renderHistoryChart(history) {
+  const container = document.getElementById('chart-container');
+  const section = document.getElementById('chart-section');
+  
+  if (!history || history.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  
+  const maxCycles = Math.max(...history.map(h => h.cycles));
+  const minCycles = Math.min(...history.map(h => h.cycles));
+  const maxSize = Math.max(...history.map(h => h.size));
+  const minSize = Math.min(...history.map(h => h.size));
+  
+  const W = 200, H = 80;
+  const pointsCycles = history.map((h, i) => {
+    const x = i * ((W - 20) / (history.length - 1 || 1)) + 10;
+    const y = H - 10 - (h.cycles - minCycles) / (maxCycles - minCycles || 1) * (H - 20);
+    return `${x},${y}`;
+  });
+  
+  const pointsSize = history.map((h, i) => {
+    const x = i * ((W - 20) / (history.length - 1 || 1)) + 10;
+    const y = H - 10 - (h.size - minSize) / (maxSize - minSize || 1) * (H - 20);
+    return `${x},${y}`;
+  });
+  
+  const svgHtml = `
+    <svg width="${W}" height="${H}" style="border: 1px solid #30363d; background: #0d1117; border-radius: 4px; display:block; margin: 4px auto;">
+      <line x1="10" y1="10" x2="10" y2="${H-10}" stroke="#21262d"/>
+      <line x1="10" y1="${H-10}" x2="${W-10}" y2="${H-10}" stroke="#21262d"/>
+      
+      <!-- Cycles line (Green) -->
+      <polyline fill="none" stroke="#2ea043" stroke-width="2" points="${pointsCycles.join(' ')}" />
+      <!-- Size line (Blue) -->
+      <polyline fill="none" stroke="#58a6ff" stroke-width="1.5" points="${pointsSize.join(' ')}" stroke-dasharray="3,2" />
+      
+      <!-- Cycles Dot points -->
+      ${pointsCycles.map(p => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="2.5" fill="#2ea043"/>`).join('')}
+      <!-- Size Dot points -->
+      ${pointsSize.map(p => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="2" fill="#58a6ff"/>`).join('')}
+    </svg>
+    <div style="display:flex; justify-content:space-between; font-size:9px; color:#8b949e; padding:0 6px;">
+      <span style="color:#2ea043">● Cycles (${minCycles}-${maxCycles})</span>
+      <span style="color:#58a6ff">◌ Size (${minSize}-${maxSize})</span>
+    </div>
+  `;
+  container.innerHTML = svgHtml;
+}
+
+// ─── Level Editor Mode ────────────────────────────────────────────────────
+let editorMode = false;
+let selectedBrush = 'wall';
+let editLevelDef = null;
+
+function enterEditorMode() {
+  if (autoTimer) stopAuto();
+  editorMode = true;
+  
+  const currentDef = LEVELS[currentLevel];
+  if (currentDef) {
+    editLevelDef = JSON.parse(JSON.stringify(currentDef));
+    delete editLevelDef.filename;
+  } else {
+    editLevelDef = {
+      name: "Custom Level",
+      description: "Describe puzzle goal here.",
+      width: 5,
+      height: 5,
+      robots: [{x:0, y:0, facing:'N'}],
+      items: [],
+      walls: [],
+      inboxes: [],
+      outboxes: [],
+      conveyors: [],
+      buttons: [],
+      doors: []
+    };
+  }
+  
+  document.getElementById('edit-level-name').value = editLevelDef.name || 'Custom Level';
+  document.getElementById('edit-level-desc').value = editLevelDef.description || '';
+  document.getElementById('edit-level-width').value = editLevelDef.width || 5;
+  document.getElementById('edit-level-height').value = editLevelDef.height || 5;
+  document.getElementById('edit-level-filename').value = currentDef ? (currentDef.filename || 'custom_level.json') : 'custom_level.json';
+  
+  document.getElementById('editor-panel').style.display = 'none';
+  document.getElementById('state-panel').style.display = 'none';
+  document.getElementById('editor-palette-panel').style.display = 'flex';
+  
+  setBrush('wall');
+  drawEditGrid();
+  
+  const canvas = document.getElementById('grid-canvas');
+  canvas.addEventListener('click', handleCanvasEditorClick);
+  
+  // Attach dimension change listeners
+  document.getElementById('edit-level-width').addEventListener('change', drawEditGrid);
+  document.getElementById('edit-level-height').addEventListener('change', drawEditGrid);
+  
+  setMsg("Editor Mode active. Select a brush and click grid tiles to edit.", "msg-info");
+}
+
+function exitEditorMode() {
+  editorMode = false;
+  
+  document.getElementById('editor-panel').style.display = 'flex';
+  document.getElementById('state-panel').style.display = 'flex';
+  document.getElementById('editor-palette-panel').style.display = 'none';
+  
+  const canvas = document.getElementById('grid-canvas');
+  canvas.removeEventListener('click', handleCanvasEditorClick);
+  
+  document.getElementById('edit-level-width').removeEventListener('change', drawEditGrid);
+  document.getElementById('edit-level-height').removeEventListener('change', drawEditGrid);
+  
+  loadLevel(currentLevel);
+}
+
+function setBrush(brush) {
+  selectedBrush = brush;
+  document.querySelectorAll('.brush-btn').forEach(btn => btn.style.background = '#21262d');
+  const activeBtn = document.getElementById(`brush-${brush}`);
+  if (activeBtn) activeBtn.style.background = '#0d4a2a';
+  
+  const configContainer = document.getElementById('brush-config');
+  const configFields = document.getElementById('brush-config-fields');
+  
+  if (brush === 'conveyor') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Conveyor Direction:</label>
+      <select id="brush-conveyor-dir" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;">
+        <option value="N">North (↑)</option>
+        <option value="E">East (→)</option>
+        <option value="S">South (↓)</option>
+        <option value="W">West (←)</option>
+      </select>
+    `;
+  } else if (brush === 'inbox') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Inbox Queue (comma separated):</label>
+      <input type="text" id="brush-inbox-queue" value="1,2,3" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+    `;
+  } else if (brush === 'outbox') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Expected Output (comma separated):</label>
+      <input type="text" id="brush-outbox-expected" value="2,4,6" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+    `;
+  } else if (brush === 'button') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Target Doors X,Y (separate by semicolons):</label>
+      <input type="text" id="brush-button-targets" value="3,2" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+    `;
+  } else if (brush === 'item') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Item Value:</label>
+      <input type="number" id="brush-item-value" value="1" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;" />
+    `;
+  } else if (brush === 'robot') {
+    configContainer.style.display = 'block';
+    configFields.innerHTML = `
+      <label>Robot Facing:</label>
+      <select id="brush-robot-facing" style="background:#0d1117; color:#fff; border:1px solid #30363d; padding:4px; border-radius:3px;">
+        <option value="N">North (↑)</option>
+        <option value="E">East (→)</option>
+        <option value="S">South (↓)</option>
+        <option value="W">West (←)</option>
+      </select>
+    `;
+  } else {
+    configContainer.style.display = 'none';
+  }
+}
+
+function handleCanvasEditorClick(event) {
+  if (!editorMode || !editLevelDef) return;
+  
+  const canvas = document.getElementById('grid-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const cx = event.clientX - rect.left - PAD;
+  const cy = event.clientY - rect.top - PAD;
+  const gx = Math.floor(cx / TILE);
+  const gy = Math.floor(cy / TILE);
+  
+  const w = parseInt(document.getElementById('edit-level-width').value) || 5;
+  const h = parseInt(document.getElementById('edit-level-height').value) || 5;
+  editLevelDef.width = w;
+  editLevelDef.height = h;
+  
+  if (gx < 0 || gx >= w || gy < 0 || gy >= h) return;
+  
+  // Clear coordinates
+  editLevelDef.walls = (editLevelDef.walls || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.doors = (editLevelDef.doors || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.items = (editLevelDef.items || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.inboxes = (editLevelDef.inboxes || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.outboxes = (editLevelDef.outboxes || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.conveyors = (editLevelDef.conveyors || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.buttons = (editLevelDef.buttons || []).filter(item => !(item.x === gx && item.y === gy));
+  editLevelDef.robots = (editLevelDef.robots || []).filter(item => !(item.x === gx && item.y === gy));
+  
+  // Apply brush tools
+  if (selectedBrush === 'wall') {
+    editLevelDef.walls.push({x: gx, y: gy});
+  } else if (selectedBrush === 'door') {
+    editLevelDef.doors.push({x: gx, y: gy});
+  } else if (selectedBrush === 'robot') {
+    const facing = document.getElementById('brush-robot-facing').value;
+    editLevelDef.robots.push({x: gx, y: gy, facing: facing});
+  } else if (selectedBrush === 'inbox') {
+    const qText = document.getElementById('brush-inbox-queue').value;
+    const queue = qText.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    editLevelDef.inboxes.push({x: gx, y: gy, queue: queue});
+  } else if (selectedBrush === 'outbox') {
+    const expText = document.getElementById('brush-outbox-expected').value;
+    const expected = expText.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    editLevelDef.outboxes.push({x: gx, y: gy, expected: expected});
+  } else if (selectedBrush === 'conveyor') {
+    const dir = document.getElementById('brush-conveyor-dir').value;
+    editLevelDef.conveyors.push({x: gx, y: gy, dir: dir});
+  } else if (selectedBrush === 'button') {
+    const targetsText = document.getElementById('brush-button-targets').value;
+    const targets = targetsText.split(';').map(t => {
+      const coords = t.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+      return coords.length === 2 ? {x: coords[0], y: coords[1]} : null;
+    }).filter(t => t !== null);
+    editLevelDef.buttons.push({x: gx, y: gy, targets: targets});
+  } else if (selectedBrush === 'item') {
+    const val = parseInt(document.getElementById('brush-item-value').value) || 1;
+    editLevelDef.items.push({x: gx, y: gy, value: val});
+  }
+  
+  drawEditGrid();
+}
+
+function drawEditGrid() {
+  if (!editLevelDef) return;
+  const w = parseInt(document.getElementById('edit-level-width').value) || 5;
+  const h = parseInt(document.getElementById('edit-level-height').value) || 5;
+  editLevelDef.width = w;
+  editLevelDef.height = h;
+  
+  vm = {
+    grid: new Grid(editLevelDef),
+    robots: (editLevelDef.robots || []).map(r => ({
+      x: r.x, y: r.y, facing: r.facing || 'N', inventory: null, halted: false
+    })),
+    levelDef: editLevelDef,
+    halted: false,
+    cycles: 0
+  };
+  
+  drawGrid(1.0);
+}
+
+async function saveCustomLevel() {
+  if (!editLevelDef) return;
+  
+  const filename = document.getElementById('edit-level-filename').value.trim();
+  if (!filename) {
+    setMsg("Enter a valid filename (e.g. custom.json)", "msg-err");
+    return;
+  }
+  
+  editLevelDef.name = document.getElementById('edit-level-name').value.trim() || 'Custom Level';
+  editLevelDef.description = document.getElementById('edit-level-desc').value.trim();
+  
+  if (editLevelDef.outboxes && editLevelDef.outboxes.length > 0) {
+    editLevelDef.expected_output = editLevelDef.outboxes[0].expected || [];
+  }
+  
+  if (window.location.protocol.startsWith('http')) {
+    try {
+      const res = await fetch('/api/levels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: filename, level_def: editLevelDef })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMsg(`Level saved successfully as ${data.filename}!`, "msg-ok");
+        
+        const listRes = await fetch('/api/levels');
+        if (listRes.ok) {
+          LEVELS = await listRes.json();
+          updateLevelSelector();
+          const newIdx = LEVELS.findIndex(l => l.filename === data.filename);
+          if (newIdx !== -1) {
+            currentLevel = newIdx;
+            sel.value = newIdx;
+          }
+        }
+      } else {
+        setMsg("Failed to save level to disk.", "msg-err");
+      }
+    } catch(e) {
+      setMsg(`Error saving level: ${e.message}`, "msg-err");
+    }
+  } else {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(editLevelDef, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", filename);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    setMsg("Downloaded custom level JSON!", "msg-ok");
+  }
+}
+
+async function initUI() {
+  if (window.location.protocol.startsWith('http')) {
+    try {
+      const res = await fetch('/api/levels');
+      if (res.ok) {
+        LEVELS = await res.json();
+      }
+    } catch(e) {
+      console.warn("Could not fetch levels from server. Using embedded levels instead.", e);
+    }
+    
+    try {
+      const res = await fetch('/api/profile');
+      if (res.ok) {
+        userProfile = await res.json();
+      }
+    } catch(e) {
+      console.warn("Could not fetch profile from server.", e);
+    }
+  }
+  
+  updateLevelSelector();
+  sel.addEventListener('change',()=>loadLevel(parseInt(sel.value)));
+  
+  loadLevel(0);
+}
+
+initUI();
+</script>
+</body>
+</html>
