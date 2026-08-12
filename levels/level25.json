@@ -1,0 +1,26 @@
+{
+  "name": "Level 25: Microkernel Context Switcher",
+  "description": "The Ultimate OS Kernel Challenge! Process 1 PCB is stored in RAM 0..3 [11,22,33,44]. Process 2 PCB is stored in RAM 4..7 [55,66,77,88]. Read Process IDs [1, 2] from Inbox (0,1). Load selected Process PCB into R0..R3, increment each register by 1 (Context Save), write back to RAM PCB, and drop sum of R0..R3 into Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1, 2]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [114, 290],
+  "filename": "level25.json"
+}

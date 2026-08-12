@@ -1,0 +1,38 @@
+{
+  "name": "Level 19: Tri-Robot Pipeline",
+  "description": "3-Robot Pipeline! Robot 0 reads values from Inbox (0,1) & SENDS to Robot 1. Robot 1 multiplies by 3 & SENDS to Robot 2. Robot 2 adds 1 and DROPs to Outbox (6,1).",
+  "width": 7,
+  "height": 3,
+  "robots": [
+    {
+      "x": 1,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "facing": "W"
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [2, 5, 10]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 6,
+      "y": 1
+    }
+  ],
+  "expected_output": [7, 16, 31],
+  "filename": "level19.json"
+}

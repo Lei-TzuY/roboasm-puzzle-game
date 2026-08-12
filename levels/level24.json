@@ -1,0 +1,43 @@
+{
+  "name": "Level 24: Quad-Robot Distributed Parallel Sum",
+  "description": "4-Robot Distributed Computing Network! Robot 0 reads [10, 20, 30, 40] from Inbox (0,1) and distributes pair halves over IPC to Robot 1 and Robot 2. Robot 1 and Robot 2 sum their pairs and send to Robot 3. Robot 3 calculates the grand total (100) and drops it in Outbox (8,1)!",
+  "width": 9,
+  "height": 3,
+  "robots": [
+    {
+      "x": 1,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 7,
+      "y": 1,
+      "facing": "W"
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [10, 20, 30, 40]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 8,
+      "y": 1
+    }
+  ],
+  "expected_output": [100],
+  "filename": "level24.json"
+}

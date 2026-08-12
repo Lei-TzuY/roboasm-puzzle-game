@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python -m compileall -q .
+      - name: Validate all level solutions
+        run: python scratch/test_all_solutions.py
+      - name: Run component tests
+        run: |
+          python scratch/test_assembler.py
+          python scratch/test_optimizer.py
+          python scratch/test_jit.py
+          python scratch/test_ai_solver.py
+          python scratch/test_cli_compiler.py

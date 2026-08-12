@@ -5,6 +5,10 @@ import glob
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+from lexer import Lexer, LexerError
+from assembler import Assembler, AssemblerError
+from disassembler import Disassembler
+
 class RoboASMRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress request logging to keep the console clean
@@ -44,7 +48,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                 try:
                     with open(lf, 'r', encoding='utf-8') as f:
                         level_data = json.load(f)
-                        # Add filename property so frontend knows which file this corresponds to
                         level_data['filename'] = os.path.basename(lf)
                         levels.append(level_data)
                 except Exception as e:
@@ -90,49 +93,80 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     print(f"Error reading profile: {e}")
             self.wfile.write(json.dumps(profile).encode('utf-8'))
-            
-        # API: Save new custom level
-        elif path == '/api/levels':
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-            try:
-                data = json.loads(post_data.decode('utf-8'))
-                filename = data.get('filename')
-                if not filename:
-                    self.send_error(400, "Missing 'filename' in request body")
-                    return
-                
-                filename = os.path.basename(filename)
-                if not filename.endswith('.json'):
-                    filename += '.json'
-                
-                levels_dir = os.path.join(os.path.dirname(__file__), 'levels')
-                os.makedirs(levels_dir, exist_ok=True)
-                lvl_path = os.path.join(levels_dir, filename)
-                
-                level_def = data.get('level_def')
-                if not level_def:
-                    self.send_error(400, "Missing 'level_def' in request body")
-                    return
-                
-                with open(lvl_path, 'w', encoding='utf-8') as f:
-                    json.dump(level_def, f, indent=2)
-                
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "success", "filename": filename}).encode('utf-8'))
-            except Exception as e:
-                self.send_error(500, f"Error saving level: {e}")
         else:
             self.send_error(404, "Not found")
 
     def do_POST(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
+
+        # API: Assemble code via Python Assembler
+        if path == '/api/assemble':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                code = data.get('code', '')
+
+                lexer = Lexer(code)
+                tokens = lexer.tokenize()
+                assembler = Assembler(tokens)
+                instructions = assembler.assemble()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "instructions": instructions,
+                    "symbol_table": assembler.symbol_table,
+                    "data_memory": assembler.data_memory
+                }).encode('utf-8'))
+            except (LexerError, AssemblerError) as e:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "error": str(e),
+                    "line_num": getattr(e, 'line_num', None)
+                }).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "error": f"Internal assembly error: {e}"
+                }).encode('utf-8'))
+
+        # API: Disassemble instructions to code
+        elif path == '/api/disassemble':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            try:
+                data = json.loads(post_data.decode('utf-8'))
+                instructions = data.get('instructions', [])
+                symbol_table = data.get('symbol_table', {})
+
+                disasm = Disassembler(instructions, symbol_table)
+                code = disasm.disassemble()
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "code": code
+                }).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "error": str(e)}).encode('utf-8'))
         
         # API: Save solution for a level
-        if path == '/api/solutions':
+        elif path == '/api/solutions':
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
             try:
@@ -196,7 +230,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                         profile[level_file]['best_size'] = size
                         new_record = True
                 
-                # Append to history list
                 profile[level_file]['history'].append({
                     'timestamp': int(time.time()),
                     'cycles': cycles,
@@ -205,7 +238,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                 if len(profile[level_file]['history']) > 30:
                     profile[level_file]['history'].pop(0)
                 
-                # Always save profile.json since history updates
                 with open(profile_path, 'w', encoding='utf-8') as f:
                     json.dump(profile, f, indent=2)
                 

@@ -1,0 +1,26 @@
+{
+  "name": "Level 22: Binary Search",
+  "description": "RAM 0..7 contains a sorted array [3, 8, 15, 24, 35, 48, 63, 80]. Read target X from Inbox (0,1). Perform binary search to find X. Output index (0..7) or -1 if not found into Outbox (4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [15, 48, 99]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [2, 5, -1],
+  "filename": "level22.json"
+}

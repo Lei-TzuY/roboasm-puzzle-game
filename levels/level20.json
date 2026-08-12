@@ -1,0 +1,81 @@
+{
+  "name": "Level 20: The Grand Teleportation Citadel",
+  "description": "Master Boss Level! Pick key at (0,0), place it on Button (3,0) to permanently open Door (3,2). Step onto Portal at (4,0) to teleport to (2,2). Read numbers from Inbox (0,2), filter out odd numbers, push even numbers to Stack, and output to Outbox (4,2) in REVERSE order!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 0,
+    "y": 0,
+    "facing": "E"
+  },
+  "items": [
+    {
+      "x": 0,
+      "y": 0,
+      "value": 1
+    }
+  ],
+  "buttons": [
+    {
+      "x": 3,
+      "y": 0,
+      "targets": [
+        {
+          "x": 3,
+          "y": 2
+        }
+      ]
+    }
+  ],
+  "doors": [
+    {
+      "x": 3,
+      "y": 2
+    }
+  ],
+  "portals": [
+    {
+      "x": 4,
+      "y": 0,
+      "target_x": 2,
+      "target_y": 2
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 2,
+      "queue": [4, 7, 10, 15]
+    }
+  ],
+  "walls": [
+    {
+      "x": 0,
+      "y": 1
+    },
+    {
+      "x": 1,
+      "y": 1
+    },
+    {
+      "x": 2,
+      "y": 1
+    },
+    {
+      "x": 3,
+      "y": 1
+    },
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 2
+    }
+  ],
+  "expected_output": [10, 4],
+  "filename": "level20.json"
+}

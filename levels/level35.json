@@ -1,0 +1,33 @@
+{
+  "name": "Level 35: The AI Assembly Synthesis Grand Finale",
+  "description": "Grand Finale Level 35! Cooperative Dual-Robot AI Benchmark! Robot 0 reads [10, 20, 30] from Inbox (0,1), doubles each number (20, 40, 60), and SENDS over IPC to Robot 1. Robot 1 RECVs each number, adds 5 (25, 45, 65), and drops into Outbox (6,1)!",
+  "width": 7,
+  "height": 3,
+  "robots": [
+    {
+      "x": 1,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "facing": "W"
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [10, 20, 30]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 6,
+      "y": 1
+    }
+  ],
+  "expected_output": [25, 45, 65],
+  "filename": "level35.json"
+}

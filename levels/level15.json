@@ -1,0 +1,33 @@
+{
+  "name": "Level 15: Dual Robot Messaging",
+  "description": "Co-op IPC Level! Robot 0 picks numbers from Inbox (at 0,1) and uses SEND. Robot 1 uses RECV to receive them, doubles each value, and drops them into Outbox (at 6,1).",
+  "width": 7,
+  "height": 3,
+  "robots": [
+    {
+      "x": 1,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "facing": "W"
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [3, 7, 12]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 6,
+      "y": 1
+    }
+  ],
+  "expected_output": [6, 14, 24],
+  "filename": "level15.json"
+}

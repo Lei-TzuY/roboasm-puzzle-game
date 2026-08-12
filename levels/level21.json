@@ -1,0 +1,19 @@
+{
+  "name": "Level 21: Linked List Traversal",
+  "description": "RAM 0 contains the head pointer of a linked list. Each node at RAM address 'ptr' has: RAM[ptr] = value, RAM[ptr+1] = next pointer (0 = END). Traverse the linked list and output all node values to Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 0,
+    "y": 1,
+    "facing": "E"
+  },
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [42, 99, 7],
+  "filename": "level21.json"
+}

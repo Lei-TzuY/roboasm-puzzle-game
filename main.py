@@ -7,6 +7,7 @@ import glob
 import re
 from lexer import Lexer
 from assembler import Assembler
+from disassembler import Disassembler
 from vm import VM
 from level import Level
 
@@ -42,6 +43,33 @@ RED = '\033[91m'
 GRAY = '\033[90m'
 BLUE = '\033[94m'
 RESET = '\033[0m'
+
+def compile_bytecode(input_asm, output_bin, optimize=False):
+    with open(input_asm, 'r', encoding='utf-8') as f:
+        code = f.read()
+    lexer = Lexer(code)
+    tokens = lexer.tokenize()
+    assembler = Assembler(tokens, base_dir=os.path.dirname(os.path.abspath(input_asm)))
+    instructions = assembler.assemble(optimize=optimize)
+
+    payload = {
+        'instructions': instructions,
+        'symbol_table': assembler.symbol_table,
+        'data_memory': assembler.data_memory
+    }
+    with open(output_bin, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=2)
+    print(f"Successfully compiled '{input_asm}' -> '{output_bin}' ({len(instructions)} opcodes).")
+
+def disassemble_bytecode(input_bin):
+    with open(input_bin, 'r', encoding='utf-8') as f:
+        payload = json.load(f)
+    instructions = payload.get('instructions', [])
+    symbol_table = payload.get('symbol_table', {})
+    disasm = Disassembler(instructions, symbol_table)
+    code = disasm.disassemble()
+    print(f"=== Disassembly of '{input_bin}' ===")
+    print(code)
 
 def render_vm(vm, grid, level):
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -107,7 +135,7 @@ def run_vm(code, level_file):
     lexer = Lexer(code)
     tokens = lexer.tokenize()
     
-    assembler = Assembler(tokens)
+    assembler = Assembler(tokens, base_dir=os.path.dirname(os.path.abspath(level_file)))
     instructions = assembler.assemble()
     
     if not instructions:
@@ -142,7 +170,6 @@ def run_vm(code, level_file):
             prev_halted = [r.halted for r in vm.robots]
             
         vm.step()
-        grid.tick(vm.robots)
         steps += 1
         
         if mode == 'auto':
@@ -189,7 +216,7 @@ def editor(level_file):
     level = Level(level_file)
     
     if os.path.exists(code_file):
-        with open(code_file, 'r') as f:
+        with open(code_file, 'r', encoding='utf-8') as f:
             lines = f.read().split('\n')
             if len(lines) == 1 and not lines[0]:
                 lines = []
@@ -216,7 +243,7 @@ def editor(level_file):
         if cmd in ['quit', 'exit', 'q']:
             return
         elif op == 'save':
-            with open(code_file, 'w') as f:
+            with open(code_file, 'w', encoding='utf-8') as f:
                 f.write("\n".join(lines))
             print(f"Saved to {code_file}!")
             input("Press Enter...")
@@ -227,7 +254,7 @@ def editor(level_file):
                 profile = {}
                 if os.path.exists(profile_path):
                     try:
-                        with open(profile_path, 'r') as f:
+                        with open(profile_path, 'r', encoding='utf-8') as f:
                             profile = json.load(f)
                     except: pass
                 
@@ -247,7 +274,7 @@ def editor(level_file):
                 if new_record:
                     print(f"\n{YELLOW}*** NEW RECORD SAVED! ***{RESET}")
                     input("Press Enter...")
-                    with open(profile_path, 'w') as f:
+                    with open(profile_path, 'w', encoding='utf-8') as f:
                         json.dump(profile, f, indent=2)
         elif op == 'del':
             try:
@@ -260,12 +287,10 @@ def editor(level_file):
             try:
                 l = int(parts[1]) - 1
                 inst = " ".join(parts[2:])
-                # preserve exact casing for labels etc
                 lines.insert(max(0, min(l, len(lines))), inst)
             except:
                 pass
         else:
-            # Just append the raw command
             lines.append(cmd)
 
 def main_menu():
@@ -285,14 +310,14 @@ def main_menu():
         profile = {}
         if os.path.exists(profile_path):
             try:
-                with open(profile_path, 'r') as f:
+                with open(profile_path, 'r', encoding='utf-8') as f:
                     profile = json.load(f)
             except: pass
         
         levels_data = []
         for lf in level_files:
             try:
-                with open(lf) as f:
+                with open(lf, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     levels_data.append((lf, data.get('name', lf), os.path.basename(lf)))
             except:
@@ -319,12 +344,20 @@ def main_menu():
             pass
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="RoboASM Assembly Engine & Compiler")
     parser.add_argument("--level", help="Path to level JSON file", default=None)
     parser.add_argument("--web", action="store_true", help="Start the Web IDE server")
+    parser.add_argument("--compile", help="Input assembly file to compile into bytecode", default=None)
+    parser.add_argument("-o", "--output", help="Output bytecode file path", default="output.bin")
+    parser.add_argument("--optimize", action="store_true", help="Enable bytecode AST optimization passes")
+    parser.add_argument("--disassemble", help="Input bytecode file to disassemble", default=None)
     args = parser.parse_args()
     
-    if args.web:
+    if args.compile:
+        compile_bytecode(args.compile, args.output, optimize=args.optimize)
+    elif args.disassemble:
+        disassemble_bytecode(args.disassemble)
+    elif args.web:
         from web_server import start_web_server
         start_web_server()
     elif args.level:
