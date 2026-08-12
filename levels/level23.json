@@ -1,0 +1,26 @@
+{
+  "name": "Level 23: RPN Stack Calculator",
+  "description": "Evaluate Reverse Polish Notation (RPN) expressions from Inbox (0,1) using Stack! Positive numbers are operands. Special codes: -1 = ADD, -2 = SUB, -3 = MUL, -99 = END. Output final calculation result to Outbox (4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [5, 3, -1, 4, -3, -99]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [32],
+  "filename": "level23.json"
+}

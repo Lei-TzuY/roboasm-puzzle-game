@@ -26,20 +26,14 @@ def test_level(lvl_id):
         lexer = Lexer(code)
         tokens = lexer.tokenize()
         
-        assembler = Assembler(tokens)
+        assembler = Assembler(tokens, base_dir=os.path.dirname(os.path.abspath(asm_file)))
         instructions = assembler.assemble()
         
-        vm = VM(instructions, grid, level.robots_config)
+        vm = VM(instructions, grid, level.robots_config, data_memory=assembler.data_memory)
         
         steps = 0
         while not vm.halted and steps < 1000:
-            for robot in vm.robots:
-                if not robot.halted:
-                    try:
-                        robot.step(vm.instructions, vm.grid)
-                    except ValueError:
-                        robot.halted = True
-            vm.grid.tick(vm.robots)
+            vm.step()
             steps += 1
             won, msg = level.check_win(vm, vm.grid)
             if won:
@@ -59,7 +53,7 @@ def main():
     print("-" * 60)
     
     all_ok = True
-    for i in range(1, 13):
+    for i in range(1, 36):
         ok, msg = test_level(i)
         status = "PASS" if ok else "FAIL"
         print(f"Level {i:<5} | {status:<8} | {msg}")
@@ -67,7 +61,7 @@ def main():
             all_ok = False
             
     if all_ok:
-        print("\nAll 12 level solutions verified successfully!")
+        print("\nAll 35 level solutions verified successfully!")
         sys.exit(0)
     else:
         print("\nSome tests failed!")

@@ -1,0 +1,26 @@
+{
+  "name": "Level 18: 2D Matrix Map",
+  "description": "Read X from Inbox (0,1), read Y from Inbox (0,1). Compute 2D index = Y * 3 + X, LOAD target RAM value, and drop into Outbox (4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1, 2]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [80],
+  "filename": "level18.json"
+}

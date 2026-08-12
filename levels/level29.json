@@ -1,0 +1,26 @@
+{
+  "name": "Level 29: Fixed-Point Math Engine (Q8.8)",
+  "description": "Q8.8 Fixed-Point Math Unit! Read Q8.8 numbers A (512 = 2.0) and B (1024 = 4.0) from Inbox (0,1). Compute Q8.8 fixed-point multiplication Result = (A * B) >> 8 (which equals 2048 = 8.0) and drop into Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [512, 1024]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [2048],
+  "filename": "level29.json"
+}

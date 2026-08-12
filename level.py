@@ -3,7 +3,7 @@ from grid import Grid
 
 class Level:
     def __init__(self, filename):
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
         self.name = data.get('name', 'Unnamed Level')
@@ -26,6 +26,7 @@ class Level:
         self.conveyors = data.get('conveyors', [])
         self.buttons = data.get('buttons', [])
         self.doors = data.get('doors', [])
+        self.portals = data.get('portals', [])
         self.expected_output = data.get('expected_output', [])
         
     def create_grid(self):
@@ -45,6 +46,8 @@ class Level:
             grid.buttons[(btn['x'], btn['y'])] = targets
         for door in self.doors:
             grid.doors.add((door['x'], door['y']))
+        for p in self.portals:
+            grid.portals[(p['x'], p['y'])] = (p['target_x'], p['target_y'])
         return grid
         
     def check_win(self, vm, grid):

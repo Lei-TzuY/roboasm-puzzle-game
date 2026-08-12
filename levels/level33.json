@@ -1,0 +1,26 @@
+{
+  "name": "Level 33: Self-Modifying Code Simulation",
+  "description": "Self-Modifying Code Patching! RAM 0=50, RAM 1=20. Read dynamic opcode patch 1 (ADD) from Inbox (0,1). Store patch into RAM 2. Read patch from RAM 2, execute patched operation (50 + 20 = 70), and drop result into Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [70],
+  "filename": "level33.json"
+}

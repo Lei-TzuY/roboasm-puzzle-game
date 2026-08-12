@@ -1,0 +1,26 @@
+{
+  "name": "Level 34: FFT Butterfly Unit",
+  "description": "Fast Fourier Transform (FFT) Butterfly Unit! Read signal inputs A (12) and B (5) from Inbox (0,1). Compute Radix-2 Butterfly outputs: Sum component X = A + B (17) and Difference component Y = A - B (7). Drop [17, 7] into Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [12, 5]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [17, 7],
+  "filename": "level34.json"
+}

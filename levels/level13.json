@@ -1,0 +1,26 @@
+{
+  "name": "Level 13: Stack Reverser",
+  "description": "Read 4 numbers from Inbox (at 0,1). Use PUSH to store them onto the Stack, then POP them off into the Outbox (at 4,1) to output them in REVERSE order!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [10, 20, 30, 40]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [40, 30, 20, 10],
+  "filename": "level13.json"
+}

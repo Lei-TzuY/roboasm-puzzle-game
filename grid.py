@@ -10,6 +10,7 @@ class Grid:
         self.buttons = {} # (x, y) -> list of (tx, ty) target doors
         self.doors = set() # (x, y) tuples
         self.open_doors = set() # (x, y) tuples
+        self.portals = {} # (x, y) -> (target_x, target_y)
 
     def is_wall(self, x, y):
         if x < 0 or x >= self.width or y < 0 or y >= self.height:
@@ -19,6 +20,11 @@ class Grid:
         if (x, y) in self.doors and (x, y) not in self.open_doors:
             return True
         return False
+
+    def get_portal_destination(self, x, y):
+        if (x, y) in self.portals:
+            return self.portals[(x, y)]
+        return x, y
 
     def tick(self, robots=None):
         moves = []
@@ -32,6 +38,7 @@ class Grid:
                 elif d == 'W': nx -= 1
                 
                 if not self.is_wall(nx, ny):
+                    nx, ny = self.get_portal_destination(nx, ny)
                     moves.append(((x, y), (nx, ny), val))
                     
         for (src, dst, val) in moves:
@@ -59,7 +66,6 @@ class Grid:
             val = self.inboxes[(x, y)].pop(0)
             return True, val
         return False, None
-
 
     def has_item(self, x, y):
         return (x, y) in self.items or ((x, y) in self.inboxes and len(self.inboxes[(x, y)]) > 0)

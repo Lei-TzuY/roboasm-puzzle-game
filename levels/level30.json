@@ -1,0 +1,26 @@
+{
+  "name": "Level 30: Self-Hosting Compiler Bootstrapper",
+  "description": "The Ultimate 30th Milestone Level! Write a mini-compiler in RoboASM that compiles high-level token stream [101, 10, 102, 5, 103, 999] into target bytecode! Translation Rules: Token 101->Bytecode 1 (MOV), Token 102->Bytecode 2 (ADD), Token 103->Bytecode 9 (HLT). Literals pass through untouched. Output compiled binary payload to Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [101, 10, 102, 5, 103, 999]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [1, 10, 2, 5, 9],
+  "filename": "level30.json"
+}

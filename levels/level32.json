@@ -1,0 +1,33 @@
+{
+  "name": "Level 32: Multi-Core Mutex Spinlock",
+  "description": "Multi-Core Mutex Synchronization! RAM 0 is atomic lock (0=UNLOCKED). Robot 0 reads 10 from Inbox (0,1), acquires lock, adds 5 (15), stores in RAM 1, releases lock, and signals Robot 1. Robot 1 acquires lock, reads RAM 1 (15), adds 5 (20), and drops into Outbox (6,1)!",
+  "width": 7,
+  "height": 3,
+  "robots": [
+    {
+      "x": 1,
+      "y": 1,
+      "facing": "W"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "facing": "W"
+    }
+  ],
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [10]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 6,
+      "y": 1
+    }
+  ],
+  "expected_output": [20],
+  "filename": "level32.json"
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Level 31: Dynamic Memory Allocator (malloc)",
+  "description": "Dynamic Heap Memory Allocator! RAM 0 stores free heap pointer (10). Read size 2 from Inbox (0,1). Allocate 2 words starting at free pointer (RAM 10, 11), store values 100 and 200, advance free heap pointer to 12, and output allocated base pointer (10) and sum (300) to Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [2]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [10, 300],
+  "filename": "level31.json"
+}

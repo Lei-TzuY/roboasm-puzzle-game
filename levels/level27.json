@@ -1,0 +1,26 @@
+{
+  "name": "Level 27: Virtual Memory Paging & TLB",
+  "description": "Virtual Memory Unit! RAM 0..3 stores the Page Table: Page 0->Frame 10, Page 1->Frame 20, Page 2->Frame 30, Page 3->Frame 40. Read Virtual Page numbers [0, 1, 2, 3] from Inbox (0,1), look up Physical Frame Address in Page Table, and output to Outbox (4,1)!",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [0, 1, 2, 3]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [10, 20, 30, 40],
+  "filename": "level27.json"
+}

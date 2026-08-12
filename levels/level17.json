@@ -1,0 +1,26 @@
+{
+  "name": "Level 17: Bubble Sort",
+  "description": "Read 4 numbers from Inbox (at 0,1), store in RAM 0..3, sort ascendingly using Bubble Sort, and drop sorted numbers into Outbox (at 4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [42, 11, 89, 5]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [5, 11, 42, 89],
+  "filename": "level17.json"
+}

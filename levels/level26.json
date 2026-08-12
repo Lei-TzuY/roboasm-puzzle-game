@@ -1,0 +1,26 @@
+{
+  "name": "Level 26: Shortest Path Routing",
+  "description": "RAM 0..3 contains graph shortest path distance table from Start Node 0 to nodes 0, 1, 2, 3 [0, 5, 2, 10]. Read destination node indices [1, 2, 3] from Inbox (0,1). Look up distance in RAM and output to Outbox (4,1).",
+  "width": 5,
+  "height": 3,
+  "robot": {
+    "x": 2,
+    "y": 1,
+    "facing": "W"
+  },
+  "inboxes": [
+    {
+      "x": 0,
+      "y": 1,
+      "queue": [1, 2, 3]
+    }
+  ],
+  "outboxes": [
+    {
+      "x": 4,
+      "y": 1
+    }
+  ],
+  "expected_output": [5, 2, 10],
+  "filename": "level26.json"
+}
