@@ -15,6 +15,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Conditional Compilation (`#ifdef`, `#ifndef`, `#else`, `#endif`)
   - Macro Libraries & Includes (`#include "file.asm"`)
   - Data Memory Directives (`DB`, `DW`, `.ARRAY`)
+  - Centralized ISA metadata with compile-time validation for unknown opcodes and incorrect argument counts
   - Detailed line-by-line syntax error diagnostics and line mapping
 
 - **AST Code Optimizer Engine (`optimizer.py`)**:
@@ -35,6 +36,8 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - **Bitwise Logic**: `AND`, `OR`, `XOR`, `NOT`, `SHL`, `SHR`
   - **Inter-Robot Messaging (IPC)**: `SEND msg`, `RECV dst`
   - **Extended Math**: `SWAP`, `INC`, `DEC`, `MIN`, `MAX`, `ABS`
+  - Structured runtime fault reports containing cycle, robot ID, PC, opcode, source line, and message
+  - Deterministic bounded execution through `VM.run(max_cycles=..., stop_when=...)`
 
 - **Rich Grid Mechanics**:
   - Quantum Portals / Teleporters, Pressure Buttons, Lock Doors, Conveyor Belts, Shared RAM Atomic Mutex Locks, and Multi-Robot Parallel Execution.
@@ -79,8 +82,10 @@ Run unit test suites:
 
 ```powershell
 python scratch\test_assembler.py
+python scratch\test_isa_validation.py
 python scratch\test_optimizer.py
 python scratch\test_jit.py
 python scratch\test_ai_solver.py
+python scratch\test_vm_runtime.py
 python scratch\test_cli_compiler.py
 ```

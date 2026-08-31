@@ -1,6 +1,8 @@
 import os
 import re
 
+from isa import format_arity_error, get_opcode_arity
+
 class AssemblerError(Exception):
     def __init__(self, message, line_num=None):
         line_str = f"Line {line_num}: " if line_num is not None else ""
@@ -65,6 +67,15 @@ class Assembler:
 
             opcode = parts[0].upper()
             raw_args = parts[1:]
+
+            expected_arity = get_opcode_arity(opcode)
+            if expected_arity is None:
+                raise AssemblerError(f"Unknown opcode '{opcode}'", line_num)
+            if len(raw_args) != expected_arity:
+                raise AssemblerError(
+                    format_arity_error(opcode, expected_arity, len(raw_args)),
+                    line_num,
+                )
 
             resolved_args = []
             for arg in raw_args:

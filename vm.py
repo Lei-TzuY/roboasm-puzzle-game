@@ -1,3 +1,6 @@
+from isa import get_opcode_arity
+
+
 class Robot:
     def __init__(self, x, y, facing, robot_id=0, shared_ram=None):
         self.id = robot_id
@@ -12,6 +15,7 @@ class Robot:
         self.pc = 0
         self.call_stack = []
         self.halted = False
+        self.last_error = None
 
     def get_val(self, arg):
         if isinstance(arg, int):
@@ -44,6 +48,14 @@ class Robot:
         inst = instructions[self.pc]
         op = inst['opcode']
         args = inst['args']
+
+        expected_arity = get_opcode_arity(op)
+        if expected_arity is None:
+            raise ValueError(f"Unknown opcode {op}")
+        if len(args) != expected_arity:
+            raise ValueError(
+                f"Opcode {op} expects {expected_arity} arguments, got {len(args)}"
+            )
         
         try:
             if op == 'MOV':
@@ -276,9 +288,9 @@ class Robot:
             
             self.pc += 1
             
-        except ValueError as e:
+        except ValueError:
             self.halted = True
-            raise e
+            raise
 
 class VM:
     def __init__(self, instructions, grid, robots_config, data_memory=None):
@@ -288,16 +300,77 @@ class VM:
         self.robots = [Robot(cfg['x'], cfg['y'], cfg['facing'], idx, self.shared_ram) for idx, cfg in enumerate(robots_config)]
         self.msg_queue = []
         self.halted = False
+        self.cycles = 0
+        self.faults = []
+
+    @property
+    def last_fault(self):
+        return self.faults[-1] if self.faults else None
+
+    def _record_fault(self, robot, instruction, error):
+        instruction = instruction or {}
+        fault = {
+            'cycle': self.cycles + 1,
+            'robot_id': robot.id,
+            'pc': robot.pc,
+            'opcode': instruction.get('opcode'),
+            'args': list(instruction.get('args', [])),
+            'line_num': instruction.get('line_num'),
+            'message': str(error),
+        }
+        robot.last_error = fault
+        self.faults.append(fault)
 
     def step(self):
+        if self.halted:
+            return False
+
         for robot in self.robots:
             if not robot.halted:
+                instruction = None
+                if 0 <= robot.pc < len(self.instructions):
+                    instruction = self.instructions[robot.pc]
                 try:
                     robot.step(self.instructions, self.grid, vm_context=self)
                 except ValueError as e:
                     robot.halted = True
+                    self._record_fault(robot, instruction, e)
                     
         self.grid.tick(self.robots)
+        self.cycles += 1
         all_finished = all(r.pc >= len(self.instructions) or r.halted for r in self.robots)
         if all_finished:
             self.halted = True
+        return not self.halted
+
+    def run(self, max_cycles=1000, stop_when=None):
+        """Run deterministically until halt, a stop condition, or a cycle budget.
+
+        ``stop_when`` receives this VM after each cycle and should return truthy
+        when the caller-specific goal (for example, a level win) has been met.
+        """
+        if not isinstance(max_cycles, int) or isinstance(max_cycles, bool) or max_cycles < 0:
+            raise ValueError("max_cycles must be a non-negative integer")
+
+        start_cycles = self.cycles
+        stopped_by_condition = False
+
+        while not self.halted and self.cycles - start_cycles < max_cycles:
+            self.step()
+            if stop_when is not None and stop_when(self):
+                stopped_by_condition = True
+                break
+
+        executed = self.cycles - start_cycles
+        return {
+            'cycles_executed': executed,
+            'total_cycles': self.cycles,
+            'halted': self.halted,
+            'stopped_by_condition': stopped_by_condition,
+            'limit_reached': (
+                not self.halted
+                and not stopped_by_condition
+                and executed >= max_cycles
+            ),
+            'faults': list(self.faults),
+        }
