@@ -1,7 +1,7 @@
 import os
 import re
 
-from isa import format_arity_error, get_opcode_arity
+from isa import format_arity_error, get_opcode_arity, validate_instruction_operands
 
 class AssemblerError(Exception):
     def __init__(self, message, line_num=None):
@@ -96,6 +96,18 @@ class Assembler:
                 'args': resolved_args,
                 'line_num': line_num
             })
+
+        # Step 7: Validate resolved operand types and control-flow targets.  This
+        # runs after the full program is known so jumps can be range checked.
+        instruction_count = len(self.instructions)
+        for instruction in self.instructions:
+            error = validate_instruction_operands(
+                instruction['opcode'],
+                instruction['args'],
+                instruction_count=instruction_count,
+            )
+            if error:
+                raise AssemblerError(error, instruction.get('line_num'))
 
         if optimize:
             from optimizer import Optimizer

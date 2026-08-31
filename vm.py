@@ -1,4 +1,6 @@
-from isa import get_opcode_arity
+from copy import deepcopy
+
+from isa import validate_instruction_operands
 
 
 class Robot:
@@ -46,16 +48,17 @@ class Robot:
             return
             
         inst = instructions[self.pc]
-        op = inst['opcode']
-        args = inst['args']
+        raw_op = inst.get('opcode')
+        op = raw_op.upper() if isinstance(raw_op, str) else raw_op
+        args = inst.get('args', [])
 
-        expected_arity = get_opcode_arity(op)
-        if expected_arity is None:
-            raise ValueError(f"Unknown opcode {op}")
-        if len(args) != expected_arity:
-            raise ValueError(
-                f"Opcode {op} expects {expected_arity} arguments, got {len(args)}"
-            )
+        validation_error = validate_instruction_operands(
+            op,
+            args,
+            instruction_count=len(instructions),
+        )
+        if validation_error:
+            raise ValueError(validation_error)
         
         try:
             if op == 'MOV':
@@ -214,12 +217,12 @@ class Robot:
                 if self.flags['ZERO']:
                     self.pc = args[0]
                     return
-                    
+                
             elif op == 'JNE':
                 if not self.flags['ZERO']:
                     self.pc = args[0]
                     return
-                    
+                
             elif op == 'JLT':
                 if self.flags['NEGATIVE']:
                     self.pc = args[0]
@@ -229,7 +232,7 @@ class Robot:
                 if not self.flags['ZERO'] and not self.flags['NEGATIVE']:
                     self.pc = args[0]
                     return
-                    
+                
             elif op == 'CALL':
                 self.call_stack.append(self.pc + 1)
                 self.pc = args[0]
@@ -240,7 +243,7 @@ class Robot:
                     raise ValueError("Empty call stack")
                 self.pc = self.call_stack.pop()
                 return
-                    
+                
             elif op == 'MOVE':
                 nx, ny = self.x, self.y
                 if self.facing == 'N': ny -= 1
@@ -252,7 +255,7 @@ class Robot:
                     # Check portal transport
                     nx, ny = grid.get_portal_destination(nx, ny)
                     self.x, self.y = nx, ny
-                    
+                
             elif op == 'TURN':
                 dirs = ['N', 'E', 'S', 'W']
                 idx = dirs.index(self.facing)
@@ -260,7 +263,7 @@ class Robot:
                     self.facing = dirs[(idx - 1) % 4]
                 elif args[0] in ('R', 'RIGHT'):
                     self.facing = dirs[(idx + 1) % 4]
-                    
+                
             elif op == 'PICK':
                 if (self.x, self.y) in grid.inboxes:
                     if not grid.inboxes[(self.x, self.y)]:
@@ -272,7 +275,7 @@ class Robot:
                     success, val = grid.remove_item(self.x, self.y)
                     if success:
                         self.inventory = val
-                    
+                
             elif op == 'DROP':
                 if self.inventory is not None:
                     success = grid.drop_item(self.x, self.y, self.inventory)
@@ -283,7 +286,7 @@ class Robot:
                 self.halted = True
                 return
 
-            elif op == 'NOP':
+            elif op in ('NOP', 'NOOP'):
                 pass
             
             self.pc += 1
@@ -321,6 +324,55 @@ class VM:
         robot.last_error = fault
         self.faults.append(fault)
 
+    @staticmethod
+    def _coord_entries(mapping, value_key='value'):
+        entries = []
+        for (x, y), value in sorted(mapping.items()):
+            entries.append({'x': x, 'y': y, value_key: deepcopy(value)})
+        return entries
+
+    def snapshot(self):
+        """Return a detached, JSON-friendly snapshot of debugger-visible state."""
+        robots = []
+        for robot in self.robots:
+            robots.append({
+                'id': robot.id,
+                'x': robot.x,
+                'y': robot.y,
+                'facing': robot.facing,
+                'inventory': deepcopy(robot.inventory),
+                'registers': dict(robot.registers),
+                'flags': dict(robot.flags),
+                'stack': list(robot.stack),
+                'pc': robot.pc,
+                'call_stack': list(robot.call_stack),
+                'halted': robot.halted,
+                'last_error': deepcopy(robot.last_error),
+            })
+
+        return {
+            'cycles': self.cycles,
+            'halted': self.halted,
+            'robots': robots,
+            'ram': deepcopy(self.shared_ram),
+            'messages': [
+                {'sender_id': sender_id, 'value': deepcopy(value)}
+                for sender_id, value in self.msg_queue
+            ],
+            'grid': {
+                'width': self.grid.width,
+                'height': self.grid.height,
+                'items': self._coord_entries(self.grid.items),
+                'inboxes': self._coord_entries(self.grid.inboxes, value_key='queue'),
+                'outboxes': self._coord_entries(self.grid.outboxes, value_key='queue'),
+                'open_doors': [
+                    {'x': x, 'y': y}
+                    for x, y in sorted(self.grid.open_doors)
+                ],
+            },
+            'faults': deepcopy(self.faults),
+        }
+
     def step(self):
         if self.halted:
             return False
@@ -335,7 +387,7 @@ class VM:
                 except ValueError as e:
                     robot.halted = True
                     self._record_fault(robot, instruction, e)
-                    
+                
         self.grid.tick(self.robots)
         self.cycles += 1
         all_finished = all(r.pc >= len(self.instructions) or r.halted for r in self.robots)
@@ -343,26 +395,33 @@ class VM:
             self.halted = True
         return not self.halted
 
-    def run(self, max_cycles=1000, stop_when=None):
-        """Run deterministically until halt, a stop condition, or a cycle budget.
+    def run(self, max_cycles=1000, stop_when=None, capture_trace=False):
+        """Run until halt, a stop condition, or a deterministic cycle budget.
 
         ``stop_when`` receives this VM after each cycle and should return truthy
         when the caller-specific goal (for example, a level win) has been met.
+        When ``capture_trace`` is true, the result contains the initial snapshot
+        followed by one detached snapshot for every executed cycle.
         """
         if not isinstance(max_cycles, int) or isinstance(max_cycles, bool) or max_cycles < 0:
             raise ValueError("max_cycles must be a non-negative integer")
+        if not isinstance(capture_trace, bool):
+            raise ValueError("capture_trace must be a boolean")
 
         start_cycles = self.cycles
         stopped_by_condition = False
+        trace = [self.snapshot()] if capture_trace else None
 
         while not self.halted and self.cycles - start_cycles < max_cycles:
             self.step()
+            if capture_trace:
+                trace.append(self.snapshot())
             if stop_when is not None and stop_when(self):
                 stopped_by_condition = True
                 break
 
         executed = self.cycles - start_cycles
-        return {
+        result = {
             'cycles_executed': executed,
             'total_cycles': self.cycles,
             'halted': self.halted,
@@ -372,5 +431,8 @@ class VM:
                 and not stopped_by_condition
                 and executed >= max_cycles
             ),
-            'faults': list(self.faults),
+            'faults': deepcopy(self.faults),
         }
+        if capture_trace:
+            result['trace'] = trace
+        return result

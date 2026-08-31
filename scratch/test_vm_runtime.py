@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -9,6 +10,12 @@ from vm import VM
 
 class StubGrid:
     def __init__(self):
+        self.width = 2
+        self.height = 2
+        self.items = {}
+        self.inboxes = {}
+        self.outboxes = {}
+        self.open_doors = set()
         self.ticks = 0
 
     def tick(self, robots):
@@ -54,6 +61,27 @@ class TestVMRuntime(unittest.TestCase):
         self.assertEqual(vm.last_fault['opcode'], 'MVO')
         self.assertIn('Unknown opcode', vm.last_fault['message'])
 
+    def test_malformed_bytecode_operand_faults_before_dispatch(self):
+        vm = self.make_vm([
+            {'opcode': 'MOV', 'args': [1, 'X'], 'line_num': 4},
+        ])
+
+        vm.step()
+
+        self.assertTrue(vm.halted)
+        self.assertEqual(vm.last_fault['pc'], 0)
+        self.assertIn('must be writable', vm.last_fault['message'])
+
+    def test_runtime_jump_target_is_range_checked(self):
+        vm = self.make_vm([
+            {'opcode': 'JMP', 'args': [3], 'line_num': 1},
+        ])
+
+        vm.step()
+
+        self.assertTrue(vm.halted)
+        self.assertIn('outside program range 0..1', vm.last_fault['message'])
+
     def test_run_stops_at_cycle_budget(self):
         vm = self.make_vm([
             {'opcode': 'JMP', 'args': [0], 'line_num': 1},
@@ -83,12 +111,51 @@ class TestVMRuntime(unittest.TestCase):
         self.assertEqual(vm.robots[0].registers['R0'], 3)
         self.assertEqual(result['cycles_executed'], 5)
 
-    def test_run_rejects_invalid_cycle_budget(self):
+    def test_snapshot_is_detached_and_json_serializable(self):
+        vm = self.make_vm([
+            {'opcode': 'MOV', 'args': [7, 'R0'], 'line_num': 1},
+        ])
+        vm.shared_ram[4] = 99
+        vm.msg_queue.append((0, 12))
+        vm.grid.items[(1, 1)] = 5
+
+        snapshot = vm.snapshot()
+        json.dumps(snapshot)
+
+        snapshot['robots'][0]['registers']['R0'] = 123
+        snapshot['ram'][4] = -1
+        snapshot['grid']['items'][0]['value'] = -1
+
+        self.assertEqual(vm.robots[0].registers['R0'], 0)
+        self.assertEqual(vm.shared_ram[4], 99)
+        self.assertEqual(vm.grid.items[(1, 1)], 5)
+
+    def test_run_can_capture_cycle_by_cycle_trace(self):
+        vm = self.make_vm([
+            {'opcode': 'MOV', 'args': [1, 'R0'], 'line_num': 1},
+            {'opcode': 'INC', 'args': ['R0'], 'line_num': 2},
+            {'opcode': 'HLT', 'args': [], 'line_num': 3},
+        ])
+
+        result = vm.run(max_cycles=2, capture_trace=True)
+
+        self.assertEqual(result['cycles_executed'], 2)
+        self.assertEqual(len(result['trace']), 3)
+        self.assertEqual([frame['cycles'] for frame in result['trace']], [0, 1, 2])
+        self.assertEqual(
+            [frame['robots'][0]['registers']['R0'] for frame in result['trace']],
+            [0, 1, 2],
+        )
+        self.assertTrue(result['limit_reached'])
+
+    def test_run_rejects_invalid_options(self):
         vm = self.make_vm([])
         with self.assertRaises(ValueError):
             vm.run(max_cycles=-1)
         with self.assertRaises(ValueError):
             vm.run(max_cycles=True)
+        with self.assertRaises(ValueError):
+            vm.run(capture_trace='yes')
 
 
 if __name__ == '__main__':

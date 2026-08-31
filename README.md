@@ -15,7 +15,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Conditional Compilation (`#ifdef`, `#ifndef`, `#else`, `#endif`)
   - Macro Libraries & Includes (`#include "file.asm"`)
   - Data Memory Directives (`DB`, `DW`, `.ARRAY`)
-  - Centralized ISA metadata with compile-time validation for unknown opcodes and incorrect argument counts
+  - Centralized typed ISA schemas with compile-time validation for opcode, arity, readable/writable operands, turn directions, and control-flow targets
   - Detailed line-by-line syntax error diagnostics and line mapping
 
 - **AST Code Optimizer Engine (`optimizer.py`)**:
@@ -32,12 +32,14 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 
 - **Extended ISA & Virtual Machine**:
   - **Stack**: `PUSH src`, `POP dst`
-  - **Indexed Memory / RAM**: `LOAD dst, [addr]`, `STORE src, [addr]`
+  - **Indexed Memory / RAM**: `LOAD addr dst`, `STORE src addr`
   - **Bitwise Logic**: `AND`, `OR`, `XOR`, `NOT`, `SHL`, `SHR`
   - **Inter-Robot Messaging (IPC)**: `SEND msg`, `RECV dst`
   - **Extended Math**: `SWAP`, `INC`, `DEC`, `MIN`, `MAX`, `ABS`
   - Structured runtime fault reports containing cycle, robot ID, PC, opcode, source line, and message
   - Deterministic bounded execution through `VM.run(max_cycles=..., stop_when=...)`
+  - Detached JSON-friendly debugger state through `VM.snapshot()`
+  - Optional cycle-by-cycle execution traces through `VM.run(..., capture_trace=True)`
 
 - **Rich Grid Mechanics**:
   - Quantum Portals / Teleporters, Pressure Buttons, Lock Doors, Conveyor Belts, Shared RAM Atomic Mutex Locks, and Multi-Robot Parallel Execution.
