@@ -310,7 +310,7 @@ class VM:
     def _record_fault(self, robot, instruction, error):
         instruction = instruction or {}
         fault = {
-            'cycle': self.cycles,
+            'cycle': self.cycles + 1,
             'robot_id': robot.id,
             'pc': robot.pc,
             'opcode': instruction.get('opcode'),
