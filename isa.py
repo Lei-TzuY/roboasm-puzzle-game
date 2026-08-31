@@ -56,6 +56,7 @@ OPCODE_ARITY = {
     'DROP': 0,
     'HLT': 0,
     'NOP': 0,
+    'NOOP': 0,  # Backward-compatible alias used by bundled solutions.
 }
 
 
