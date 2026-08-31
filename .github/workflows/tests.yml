@@ -21,7 +21,9 @@ jobs:
       - name: Run component tests
         run: |
           python scratch/test_assembler.py
+          python scratch/test_isa_validation.py
           python scratch/test_optimizer.py
           python scratch/test_jit.py
           python scratch/test_ai_solver.py
+          python scratch/test_vm_runtime.py
           python scratch/test_cli_compiler.py
