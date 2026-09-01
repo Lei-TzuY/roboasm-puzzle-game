@@ -275,6 +275,8 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     result = session.run(
                         max_cycles=data.get('max_cycles', 1_000),
                         capture_trace=data.get('capture_trace', False),
+                        breakpoint_lines=data.get('breakpoint_lines'),
+                        breakpoint_robot_id=data.get('breakpoint_robot_id', 0),
                     )
                 self._send_json(200, {
                     'status': 'success',
