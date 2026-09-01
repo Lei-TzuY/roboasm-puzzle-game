@@ -10,7 +10,11 @@ from http.server import HTTPServer
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from runtime_api import MAX_RUN_CYCLES, MAX_TRACE_CYCLES, execute_level_code
-from web_server import RoboASMRequestHandler, resolve_level_path
+from web_server import (
+    RoboASMRequestHandler,
+    collect_web_include_sources,
+    resolve_level_path,
+)
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -96,6 +100,12 @@ class TestHeadlessRuntime(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             resolve_level_path('missing-level.json')
 
+    def test_web_include_map_contains_project_assembly_sources(self):
+        sources = collect_web_include_sources()
+        self.assertIn('stdlib.asm', sources)
+        self.assertIn('solutions/level1.asm', sources)
+        self.assertIn('%macro', sources['stdlib.asm'])
+
 
 class TestRunHTTPAPI(unittest.TestCase):
     @classmethod
@@ -135,15 +145,36 @@ class TestRunHTTPAPI(unittest.TestCase):
     def test_web_ui_injects_runtime_layers_in_order(self):
         status, content_type, body = self.get_raw('/')
         html = body.decode('utf-8')
+        include_marker = 'globalThis.ROBOASM_WEB_INCLUDE_SOURCES='
+        preprocessor_tag = '<script src="/web_preprocessor.js"></script>'
         compat_tag = '<script src="/web_runtime_compat.js"></script>'
         authority_tag = '<script src="/web_authority.js"></script>'
+        init_tag = '<script>initUI();</script>'
 
         self.assertEqual(status, 200)
         self.assertEqual(content_type, 'text/html')
+        self.assertEqual(html.count(preprocessor_tag), 1)
         self.assertEqual(html.count(compat_tag), 1)
         self.assertEqual(html.count(authority_tag), 1)
+        self.assertEqual(html.count(init_tag), 1)
+        self.assertIn(include_marker, html)
+        self.assertIn('stdlib.asm', html)
+        self.assertLess(html.index(include_marker), html.index(preprocessor_tag))
+        self.assertLess(html.index(preprocessor_tag), html.index(compat_tag))
         self.assertLess(html.index(compat_tag), html.index(authority_tag))
+        self.assertLess(html.index(authority_tag), html.index(init_tag))
         self.assertIn('Visual Assembly IDE', html)
+
+    def test_web_preprocessor_asset_is_served_as_javascript(self):
+        status, content_type, body = self.get_raw('/web_preprocessor.js')
+        source = body.decode('utf-8')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, 'application/javascript')
+        self.assertIn('project-includes', source)
+        self.assertIn('conditional-compilation', source)
+        self.assertIn('data-directives', source)
+        self.assertIn('Max include recursion depth exceeded', source)
 
     def test_runtime_compat_asset_is_served_as_javascript(self):
         status, content_type, body = self.get_raw('/web_runtime_compat.js')
@@ -151,7 +182,6 @@ class TestRunHTTPAPI(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(content_type, 'application/javascript')
-        self.assertIn('data-directives', source)
         self.assertIn('initial-data-memory', source)
         self.assertIn('empty-inbox-pick', source)
         self.assertIn('python-modulo', source)
@@ -187,6 +217,17 @@ class TestRunHTTPAPI(unittest.TestCase):
         self.assertFalse(plain['optimized'])
         self.assertTrue(optimized['optimized'])
         self.assertLess(len(optimized['instructions']), len(plain['instructions']))
+
+    def test_assemble_endpoint_resolves_project_include(self):
+        status, payload = self.post_json('/api/assemble', {
+            'code': '#include "stdlib.asm"\nMOV -9 R0\nABS_VAL R0\nHLT',
+            'optimize': False,
+        })
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['status'], 'success')
+        self.assertEqual(payload['instructions'][1]['opcode'], 'ABS')
+        self.assertEqual(payload['instructions'][1]['args'], ['R0'])
 
     def test_run_endpoint_executes_bundled_solution(self):
         solution_path = os.path.join(ROOT_DIR, 'solutions', 'level1.asm')
