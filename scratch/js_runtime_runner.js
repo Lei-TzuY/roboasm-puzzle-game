@@ -7,6 +7,7 @@ const nodeVm = require('vm');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const WEB_UI_PATH = path.join(ROOT_DIR, 'web_ui.html');
+const WEB_COMPAT_PATH = path.join(ROOT_DIR, 'web_runtime_compat.js');
 const RUNTIME_START = 'function lex(src)';
 const RUNTIME_END = '// State & History Stack for Breakpoints & Step Back';
 
@@ -30,6 +31,14 @@ function loadEmbeddedRuntime() {
     sandbox,
     {filename: 'web_ui.runtime.js'},
   );
+
+  // The recommended server-served IDE applies the same small compatibility
+  // layer before the authoritative-runtime UI bridge.  Load it here too so CI
+  // exercises exactly that browser runtime composition rather than a test-only
+  // copy of the VM.
+  const compatSource = fs.readFileSync(WEB_COMPAT_PATH, 'utf8');
+  nodeVm.runInContext(compatSource, sandbox, {filename: 'web_runtime_compat.js'});
+
   return sandbox.__roboasmRuntime;
 }
 
