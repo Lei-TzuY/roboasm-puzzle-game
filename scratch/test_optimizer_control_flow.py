@@ -34,6 +34,26 @@ class TestControlFlowSafeOptimizer(unittest.TestCase):
         self.assertEqual(result[1]['opcode'], 'ADD')
         self.assertEqual(result[1]['args'], [3, 'R0'])
 
+    def test_constant_folding_reaches_fixed_point_in_one_optimize_call(self):
+        insts = [
+            {'opcode': 'MOV', 'args': [1, 'R0'], 'line_num': 1},
+            {'opcode': 'ADD', 'args': [2, 'R0'], 'line_num': 2},
+            {'opcode': 'ADD', 'args': [3, 'R0'], 'line_num': 3},
+            {'opcode': 'MUL', 'args': [4, 'R0'], 'line_num': 4},
+            {'opcode': 'HLT', 'args': [], 'line_num': 5},
+        ]
+        optimizer = Optimizer(insts)
+        once = optimizer.optimize()
+        twice_optimizer = Optimizer(once, optimizer.labels)
+        twice = twice_optimizer.optimize()
+
+        self.assertEqual(once, [
+            {'opcode': 'MOV', 'args': [24, 'R0'], 'line_num': 1},
+            {'opcode': 'HLT', 'args': [], 'line_num': 5},
+        ])
+        self.assertEqual(once, twice)
+        self.assertEqual(optimizer.labels, twice_optimizer.labels)
+
     def test_call_target_is_remapped_after_compaction(self):
         insts = [
             {'opcode': 'CALL', 'args': [3], 'line_num': 1},
