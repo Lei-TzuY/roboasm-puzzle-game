@@ -16,6 +16,8 @@ jobs:
         with:
           python-version: "3.x"
       - run: python -m compileall -q .
+      - name: Validate Web IDE JavaScript
+        run: node --check web_authority.js
       - name: Validate all level solutions
         run: python scratch/test_all_solutions.py
       - name: Run component tests
