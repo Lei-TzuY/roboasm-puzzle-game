@@ -13,10 +13,12 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 - **Advanced Preprocessor & Assembler**:
   - Parameterized Macros (`%macro NAME arg1 arg2 ... %endmacro`)
   - Conditional Compilation (`#ifdef`, `#ifndef`, `#else`, `#endif`)
-  - Macro Libraries & Includes (`#include "file.asm"`)
+  - Constants through `#define` / `EQU`
+  - Macro Libraries & Project Includes (`#include "file.asm"`)
   - Data Memory Directives (`DB`, `DW`, `.ARRAY`)
   - Centralized typed ISA schemas with compile-time validation for opcode, arity, readable/writable operands, turn directions, and control-flow targets
   - Detailed line-by-line syntax error diagnostics and line mapping
+  - `web_preprocessor.js` mirrors the Python preprocessing order for the server-served Web IDE, including recursive project-local includes, constants, conditional compilation, macro expansion, labels, and initial data memory.
 
 - **AST Code Optimizer Engine (`optimizer.py`)**:
   - Constant Folding (`MOV 5 R0` + `ADD 3 R0` -> `MOV 8 R0`)
@@ -49,9 +51,10 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Enforces bounded execution and confines HTTP level selection to bundled JSON levels.
 
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
-  - Extracts the actual embedded JavaScript `lex` / `assemble` / `Grid` / `Robot` / `VM` implementation from `web_ui.html` and executes it headlessly under Node.
+  - Extracts the actual embedded JavaScript `lex` / `Grid` / `Robot` / `VM` implementation from `web_ui.html`, installs the same Web preprocessor/runtime layers used by the server, and executes it headlessly under Node.
   - Compares JavaScript and authoritative Python snapshots **cycle by cycle**, including robot state, flags, stacks, RAM, IPC, items, inboxes, outboxes, doors, cycles, and halt state.
-  - Covers 19 bundled levels, including RAM/data-heavy Levels 18, 21, 22, 25, 26, 27, 31, and 33, plus explicit JavaScript/Python edge cases such as `NOOP`, negative modulo, wide bitwise integers, and shift faults.
+  - Covers 19 bundled levels, including RAM/data-heavy Levels 18, 21, 22, 25, 26, 27, 31, and 33.
+  - Adds six explicit semantic/compiler regression cases covering `NOOP`, negative modulo, wide bitwise integers, shift faults, `#define` + `EQU` + conditional macros, and `#include "stdlib.asm"`.
   - Runs as a dedicated CI gate so semantic drift is detected at the first differing cycle.
 
 - **Validated Level Assets (`level_schema.py`)**:
@@ -71,7 +74,8 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Server Verify mirrors the IDE **Optimize** checkbox so bytecode size/cycle comparisons are made in the same compile mode.
   - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
   - **Python Trace** captures bounded cycle-by-cycle snapshots with a scrubber for robots, registers, RAM, outboxes, and IPC state.
-  - The server-served IDE loads `web_runtime_compat.js` before `web_authority.js` to align legacy browser semantics with Python for `DB`/`DW`/`ARRAY` data memory, empty-inbox faults, the `NOOP` alias, Python-style modulo, and non-32-bit bitwise operations.
+  - The canonical server-served IDE bootstraps in deterministic order: project-local `.asm` include map → `web_preprocessor.js` → `web_runtime_compat.js` → `web_authority.js` → `initUI()`.
+  - `initUI()` is deferred on the HTTP path so the first automatic compile cannot race ahead of compiler/runtime compatibility installation.
   - Initial RAM produced by data directives is available to every Web robot from cycle 0 through the same shared-memory object used by `LOAD`/`STORE`.
   - 3-Star Efficiency Rating System (Speed Star ⚡, Size Star 📜, Win Star 🏆).
   - Real-time bytecode, RAM, Stack, and IPC queue inspector panels.
@@ -85,7 +89,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 python web_server.py
 ```
 
-Then open `http://127.0.0.1:8000` in your web browser. When served through `web_server.py`, the IDE automatically loads the runtime-compatibility layer and authoritative-runtime bridge. Opening `web_ui.html` directly still works as the original standalone browser IDE, but the server-served path is the canonical verified configuration.
+Then open `http://127.0.0.1:8000` in your web browser. The server-served path injects the project include map, browser preprocessor, VM compatibility layer, and authoritative-runtime bridge before initializing the IDE. Opening `web_ui.html` directly still works as the legacy standalone browser IDE, but the HTTP path is the canonical verified configuration.
 
 ### Terminal UI & Compiler CLI
 
@@ -123,6 +127,7 @@ python scratch\test_level_schema.py
 python scratch\test_vm_runtime.py
 python scratch\test_runtime_api.py
 python scratch\test_cli_compiler.py
+node --check web_preprocessor.js
 node --check web_runtime_compat.js
 node --check web_authority.js
 node --check scratch\js_runtime_runner.js

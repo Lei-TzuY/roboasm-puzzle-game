@@ -7,9 +7,31 @@ const nodeVm = require('vm');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const WEB_UI_PATH = path.join(ROOT_DIR, 'web_ui.html');
+const WEB_PREPROCESSOR_PATH = path.join(ROOT_DIR, 'web_preprocessor.js');
 const WEB_COMPAT_PATH = path.join(ROOT_DIR, 'web_runtime_compat.js');
 const RUNTIME_START = 'function lex(src)';
 const RUNTIME_END = '// State & History Stack for Breakpoints & Step Back';
+
+function collectIncludeSources(rootDir) {
+  const result = {};
+
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+      if (entry.name === '.git' || entry.name === '__pycache__' || entry.name === '.pytest_cache') continue;
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.asm') continue;
+      const relative = path.relative(rootDir, absolute).split(path.sep).join('/');
+      result[relative] = fs.readFileSync(absolute, 'utf8');
+    }
+  }
+
+  walk(rootDir);
+  return result;
+}
 
 function loadEmbeddedRuntime() {
   const html = fs.readFileSync(WEB_UI_PATH, 'utf8');
@@ -23,20 +45,21 @@ function loadEmbeddedRuntime() {
   const sandbox = {
     console,
     playAudioSynth: () => {},
+    ROBOASM_WEB_INCLUDE_SOURCES: collectIncludeSources(ROOT_DIR),
   };
   sandbox.globalThis = sandbox;
   nodeVm.createContext(sandbox);
   nodeVm.runInContext(runtimeSource, sandbox, {filename: 'web_ui.runtime.js'});
 
-  // The recommended server-served IDE applies the same compatibility layer
-  // before the authoritative-runtime UI bridge. Load it here too so CI
-  // exercises exactly that browser runtime composition rather than a test-only
-  // copy of the VM.
+  // Match the canonical server-served browser composition: compiler parity is
+  // installed first, then VM semantic compatibility.
+  const preprocessorSource = fs.readFileSync(WEB_PREPROCESSOR_PATH, 'utf8');
+  nodeVm.runInContext(preprocessorSource, sandbox, {filename: 'web_preprocessor.js'});
+
   const compatSource = fs.readFileSync(WEB_COMPAT_PATH, 'utf8');
   nodeVm.runInContext(compatSource, sandbox, {filename: 'web_runtime_compat.js'});
 
-  // Capture bindings only after compatibility has had a chance to wrap/rebind
-  // assembler and VM constructors (for example, data-memory initialization).
+  // Capture bindings only after both layers have rebound assembler/VM.
   nodeVm.runInContext(
     'globalThis.__roboasmRuntime = { lex, assemble, Grid, Robot, VM };',
     sandbox,
