@@ -18,6 +18,7 @@ jobs:
       - run: python -m compileall -q .
       - name: Validate Web IDE JavaScript
         run: |
+          node --check web_optimizer.js
           node --check web_preprocessor.js
           node --check web_runtime_compat.js
           node --check web_authority.js
@@ -28,6 +29,10 @@ jobs:
         run: python scratch/test_all_solutions.py
       - name: Cross-runtime differential validation
         run: python scratch/test_cross_runtime.py
+      - name: Optimizer parity validation
+        run: |
+          python scratch/test_optimizer_control_flow.py
+          python scratch/test_optimizer_parity.py
       - name: Run component tests
         run: |
           python scratch/test_assembler.py
