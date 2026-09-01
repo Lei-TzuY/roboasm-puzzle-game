@@ -156,16 +156,20 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
             try:
                 data = self._read_json()
                 code = data.get('code', '')
+                optimize = data.get('optimize', False)
                 if not isinstance(code, str):
                     raise ValueError("code must be a string")
+                if not isinstance(optimize, bool):
+                    raise ValueError("optimize must be a boolean")
 
                 lexer = Lexer(code)
                 tokens = lexer.tokenize()
                 assembler = Assembler(tokens, base_dir=ROOT_DIR)
-                instructions = assembler.assemble()
+                instructions = assembler.assemble(optimize=optimize)
 
                 self._send_json(200, {
                     "status": "success",
+                    "optimized": optimize,
                     "instructions": instructions,
                     "symbol_table": assembler.symbol_table,
                     "data_memory": assembler.data_memory,
@@ -194,6 +198,8 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     level_path,
                     max_cycles=data.get('max_cycles', 1000),
                     capture_trace=data.get('capture_trace', False),
+                    optimize=data.get('optimize', False),
+                    source_base_dir=ROOT_DIR,
                 )
                 self._send_json(200, result)
             except FileNotFoundError as exc:
