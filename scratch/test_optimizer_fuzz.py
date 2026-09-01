@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from assembler import Assembler
 from lexer import Lexer
+from optimizer import Optimizer
 from runtime_api import execute_level_code
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -36,13 +37,17 @@ def generate_program(seed):
         if rng.random() < 0.75:
             lines.append('NOP')
 
-        # A common optimizer pattern: MOV immediate followed by arithmetic on
-        # the same register. Values stay deliberately small for JS parity.
+        # Generate foldable chains rather than only pairs. This forces the
+        # optimizer to prove it reaches a fixed point in a single invocation.
         base = rng.randint(-9, 9)
         delta = rng.randint(-4, 4)
         op = rng.choice(arithmetic_ops)
         lines.append(f'MOV {base} {reg}')
         lines.append(f'{op} {delta} {reg}')
+        if rng.random() < 0.6:
+            lines.append(
+                f'{rng.choice(arithmetic_ops)} {rng.randint(-3, 3)} {reg}'
+            )
 
         # Conditional target is always forward, guaranteeing bounded execution.
         target = f'cond_{block}'
@@ -67,6 +72,7 @@ def generate_program(seed):
             f'MOV {rng.randint(50, 80)} R3',
             f'fuzz_fn: MOV {rng.randint(-5, 5)} R0',
             f'{rng.choice(arithmetic_ops)} {rng.randint(-3, 3)} R0',
+            f'{rng.choice(arithmetic_ops)} {rng.randint(-2, 2)} R0',
             'RET',
             'fuzz_done: NOP',
         ])
@@ -186,6 +192,24 @@ class TestOptimizerPropertyFuzz(unittest.TestCase):
                     semantic_projection(optimized['state']),
                     context,
                 )
+
+    def test_optimizer_is_idempotent_after_one_invocation(self):
+        for case in self.cases:
+            with self.subTest(seed=case['seed']):
+                assembler = Assembler(
+                    Lexer(case['code']).tokenize(), base_dir=ROOT_DIR
+                )
+                once = assembler.assemble(optimize=True)
+                labels_once = dict(assembler.labels)
+                second_optimizer = Optimizer(once, labels_once)
+                twice = second_optimizer.optimize()
+                context = f"seed={case['seed']}\n{case['code']}"
+                self.assertEqual(
+                    bytecode_projection(once),
+                    bytecode_projection(twice),
+                    context,
+                )
+                self.assertEqual(labels_once, second_optimizer.labels, context)
 
     def test_optimized_control_flow_targets_are_in_range(self):
         for case in self.cases:
