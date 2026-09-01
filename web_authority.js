@@ -13,6 +13,7 @@
   let debugRunActive = false;
   let debugRequestBusy = false;
   let debugGeneration = 0;
+  let debugHistoryDepth = 0;
 
   function esc(value) {
     return String(value)
@@ -227,6 +228,16 @@
     return result;
   }
 
+  function updateBackButton(running = debugRunActive) {
+    if (typeof document === 'undefined') return;
+    const backButton = document.getElementById('btn-back');
+    if (!backButton) return;
+    backButton.disabled = !!running || debugRequestBusy || debugHistoryDepth <= 0;
+    backButton.title = debugHistoryDepth > 0
+      ? `Authoritative Step Back (${debugHistoryDepth} retained checkpoints)`
+      : 'No authoritative debugger checkpoint is available yet.';
+  }
+
   function hydrateBrowserFromPython(payload, replaceVm = false) {
     if (!payload || !payload.state) throw new Error('Debugger response is missing VM state.');
     const state = payload.state;
@@ -272,9 +283,11 @@
       vm.grid.openDoors = new Set((state.grid.open_doors || []).map(entry => `${entry.x},${entry.y}`));
     }
 
+    debugHistoryDepth = Number.isInteger(payload.history_depth) ? payload.history_depth : debugHistoryDepth;
     selectedRobot = Math.min(selectedRobot || 0, Math.max(0, vm.robots.length - 1));
     updateState();
     drawGrid(1.0);
+    updateBackButton();
     return vm;
   }
 
@@ -284,6 +297,7 @@
     const stopButton = document.getElementById('btn-stop');
     if (runButton) runButton.disabled = !!running;
     if (stopButton) stopButton.disabled = !running;
+    updateBackButton(running);
   }
 
   function finishAuthoritativeState(payload) {
@@ -310,6 +324,8 @@
     const generation = ++debugGeneration;
     const previousSession = debugSessionId;
     debugSessionId = null;
+    debugHistoryDepth = 0;
+    updateBackButton();
     if (previousSession) deleteSession(previousSession, true).catch(() => {});
 
     const def = LEVELS[currentLevel];
@@ -346,6 +362,8 @@
       if (generation !== debugGeneration) return;
       vm = null;
       instructions = [];
+      debugHistoryDepth = 0;
+      updateBackButton();
       setMsg(`Assembly Error: ${error.message}`, 'msg-err');
       setAuthorityStatus(`<strong>Debugger session failed:</strong> ${esc(error.message)}`, 'err');
     }
@@ -363,6 +381,7 @@
     if (!vm || vm.halted) return;
 
     debugRequestBusy = true;
+    updateBackButton();
     const sessionId = debugSessionId;
     try {
       const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
@@ -380,6 +399,37 @@
       setAuthorityStatus(`<strong>Python Step failed:</strong> ${esc(error.message)}`, 'err');
     } finally {
       debugRequestBusy = false;
+      updateBackButton();
+    }
+  }
+
+  async function backAuthoritatively() {
+    if (debugRequestBusy || debugRunActive || debugHistoryDepth <= 0) return;
+    if (!(await ensureDebugSession())) return;
+
+    debugRequestBusy = true;
+    updateBackButton();
+    const sessionId = debugSessionId;
+    try {
+      const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cycles: -1}),
+      });
+      if (sessionId !== debugSessionId) return;
+      const stars = document.getElementById('stars-display');
+      if (stars) stars.innerHTML = '';
+      hydrateBrowserFromPython(payload, false);
+      const rewound = payload.rewind ? payload.rewind.cycles_rewound : 0;
+      setMsg(rewound ? `Stepped back to cycle ${payload.cycles}.` : 'No older checkpoint is retained.', 'msg-info');
+      setAuthorityStatus(`<strong>Python Step Back</strong> · persistent session · cycle ${payload.cycles} · ${payload.history_depth} checkpoints retained`, 'info');
+    } catch (error) {
+      if (error.status === 404 && sessionId === debugSessionId) debugSessionId = null;
+      setMsg(`Debugger rewind failed: ${error.message}`, 'msg-err');
+      setAuthorityStatus(`<strong>Python Step Back failed:</strong> ${esc(error.message)}`, 'err');
+    } finally {
+      debugRequestBusy = false;
+      updateBackButton();
     }
   }
 
@@ -407,6 +457,7 @@
     }
 
     debugRequestBusy = true;
+    updateBackButton();
     const sessionId = debugSessionId;
     try {
       const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
@@ -427,6 +478,7 @@
       setAuthorityStatus(`<strong>Python Run failed:</strong> ${esc(error.message)}`, 'err');
     } finally {
       debugRequestBusy = false;
+      updateBackButton();
     }
   }
 
@@ -530,7 +582,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <strong style="color:#58a6ff">Authoritative Python Runtime</strong>
         <label style="color:#8b949e">Max cycles <input id="authority-max-cycles" type="number" min="0" max="2000" value="1000" style="width:74px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"></label>
-        <span style="color:#6e7681">HTTP IDE Compile / Step / Run use one persistent Python VM session. Server Verify remains an independent replay check.</span>
+        <span style="color:#6e7681">HTTP IDE Compile / Step / Run / Step Back share one persistent Python VM timeline. Server Verify remains an independent replay check.</span>
       </div>
       <div id="${STATUS_ID}" style="color:#8b949e">Authoritative debugger controller installed.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
@@ -549,20 +601,19 @@
   function installAuthoritativeControls() {
     if (!serverModeEnabled()) return false;
     if (typeof compileAndReset !== 'function' || typeof stepOnce !== 'function'
-        || typeof runAuto !== 'function' || typeof stopAuto !== 'function') {
+        || typeof stepBack !== 'function' || typeof runAuto !== 'function'
+        || typeof stopAuto !== 'function') {
       throw new Error('Authoritative debugger controller could not find legacy IDE controls.');
     }
 
     globalThis.compileAndReset = compileAuthoritative;
     globalThis.stepOnce = stepAuthoritatively;
+    globalThis.stepBack = backAuthoritatively;
     globalThis.runAuto = runAuthoritatively;
     globalThis.stopAuto = stopAuthoritativeRun;
 
-    const backButton = document.getElementById('btn-back');
-    if (backButton) {
-      backButton.disabled = true;
-      backButton.title = 'Step Back is disabled while the HTTP IDE uses the authoritative Python debugger session.';
-    }
+    debugHistoryDepth = 0;
+    updateBackButton();
     return true;
   }
 

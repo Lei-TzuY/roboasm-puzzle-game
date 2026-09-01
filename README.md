@@ -62,18 +62,21 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 
 - **Persistent Authoritative Debug Sessions (`debug_sessions.py`, `/api/debug/sessions`)**:
   - Creates one canonical Python VM and advances that same VM across later HTTP requests instead of replaying source from cycle zero.
-  - Supports session create/state/step/run/delete operations with optional incremental trace capture.
+  - Supports session create/state/signed-step/run/delete operations with optional incremental trace capture.
+  - Positive `step` cycles advance the timeline; negative cycles restore authoritative checkpoints for real reverse debugging.
+  - Retains up to 256 full VM checkpoints per session, including robot state, stacks, shared RAM, IPC, grid items/inboxes/outboxes, open doors, halt/fault state, and cycle count.
+  - Rewind preserves the shared-RAM object identity used by every robot and can recover from terminal wins or runtime faults without creating a new session.
   - Uses opaque session IDs, a 30-minute inactivity TTL, a 32-session cap, LRU eviction, and a thread-safe registry.
   - Reuses the same compiler/level/VM preparation path as `/api/run`, so optimizer and include semantics stay authoritative.
-  - Session tests exercise real localhost HTTP lifecycle persistence, terminal no-op behavior, TTL refresh/expiration, LRU eviction, compile diagnostics, and budget validation.
+  - Session tests exercise real localhost HTTP forward/rewind persistence, terminal replay, fault recovery, bounded history, TTL refresh/expiration, LRU eviction, compile diagnostics, and budget validation.
 
 - **Authoritative Web Debugger Controller (`web_authority.js`)**:
-  - On the canonical HTTP IDE path, the existing **Compile**, **Step**, **Run**, and **Pause** controls are rebound to persistent Python debugger sessions instead of executing the duplicated browser VM.
-  - Python snapshots hydrate the existing grid, register/flag, stack, RAM, IPC, outbox, door, PC, cycle, and instruction inspectors after every authoritative step.
+  - On the canonical HTTP IDE path, the existing **Compile**, **Step**, **Run**, **Pause**, and **Step Back** controls are rebound to one persistent Python debugger timeline instead of executing the duplicated browser VM.
+  - Python snapshots hydrate the existing grid, register/flag, stack, RAM, IPC, outbox, door, PC, cycle, and instruction inspectors after every authoritative forward or reverse step.
   - **Run** advances the same Python session one cycle at a time, preserving the existing speed control, line breakpoints, and immediate Pause behavior without replaying from cycle zero.
-  - Local `file://` use keeps the legacy JavaScript VM as a standalone fallback/differential engine.
-  - **Step Back** is intentionally disabled in authoritative HTTP mode until server-side reverse execution exists, preventing local/browser state from diverging from the canonical Python session.
-  - `scratch/test_web_authority_controller.js` simulates the browser controller under Node and proves Compile → Step → Run uses one session while Python RAM/robot/IPC/grid state is reflected into the legacy visual model.
+  - **Step Back** sends a negative signed step to the same session, clears stale terminal stars, and becomes disabled automatically when no retained checkpoint remains.
+  - Local `file://` use keeps the legacy JavaScript VM as a standalone fallback/differential engine with its original local history behavior.
+  - `scratch/test_web_authority_controller.js` simulates the browser controller under Node and proves Compile → Step → Run → Step Back → Run uses one session while Python RAM/robot/IPC/grid state is reflected into the legacy visual model.
 
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
   - Extracts the actual embedded JavaScript `lex` / `Grid` / `Robot` / `VM` implementation from `web_ui.html`, installs the same Web compiler/runtime layers used by the server, and executes it headlessly under Node.
@@ -94,7 +97,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 
 - **Interactive Web IDE & Audio-Visual Studio**:
   - Web Audio API 8-Bit Retro Sound Synthesizer (`🔊 Sound: ON / OFF`).
-  - Line Breakpoints (`●`), Time-Travel Step Back (`⏪ Step Back` in standalone mode), Code Auto-Formatter (`🧹 Format`).
+  - Line Breakpoints (`●`), authoritative Time-Travel Step Back (`⏪ Step Back`), Code Auto-Formatter (`🧹 Format`).
   - **Server Verify** runs the editor source through the authoritative Python assembler + VM and reports PASS/faults independently of the persistent debugger session.
   - Server Verify mirrors the IDE **Optimize** checkbox so bytecode size/cycle comparisons are made in the same compile mode.
   - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
@@ -114,7 +117,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 python web_server.py
 ```
 
-Then open `http://127.0.0.1:8000` in your web browser. On this canonical HTTP path, Compile/Step/Run/Pause operate on a persistent authoritative Python VM and the returned snapshots drive the existing visual debugger. Opening `web_ui.html` directly still works as the legacy standalone JavaScript IDE and remains useful as a fallback/differential runtime.
+Then open `http://127.0.0.1:8000` in your web browser. On this canonical HTTP path, Compile/Step/Run/Pause/Step Back operate on a persistent authoritative Python VM and the returned snapshots drive the existing visual debugger. Opening `web_ui.html` directly still works as the legacy standalone JavaScript IDE and remains useful as a fallback/differential runtime.
 
 ### Debug Session API
 
@@ -122,12 +125,13 @@ Create a persistent debugger session with `POST /api/debug/sessions`, then use:
 
 ```text
 GET    /api/debug/sessions/{session_id}
-POST   /api/debug/sessions/{session_id}/step   {"cycles": 1}
+POST   /api/debug/sessions/{session_id}/step   {"cycles": 1}   # forward
+POST   /api/debug/sessions/{session_id}/step   {"cycles": -1}  # rewind
 POST   /api/debug/sessions/{session_id}/run    {"max_cycles": 1000, "capture_trace": false}
 DELETE /api/debug/sessions/{session_id}
 ```
 
-A session keeps the same Python VM, grid, RAM, robot stacks/registers, IPC queue, and cycle counter alive between requests.
+A session keeps the same Python VM, grid, RAM, robot stacks/registers, IPC queue, cycle counter, and a bounded 256-checkpoint reverse history alive between requests.
 
 ### Terminal UI & Compiler CLI
 
