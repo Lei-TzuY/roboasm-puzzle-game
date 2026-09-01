@@ -3,12 +3,14 @@ import re
 
 from isa import format_arity_error, get_opcode_arity, validate_instruction_operands
 
+
 class AssemblerError(Exception):
     def __init__(self, message, line_num=None):
         line_str = f"Line {line_num}: " if line_num is not None else ""
         super().__init__(f"Assembler Error: {line_str}{message}")
         self.line_num = line_num
         self.message = message
+
 
 class Assembler:
     def __init__(self, tokens, base_dir=None, stdlib=None):
@@ -21,20 +23,23 @@ class Assembler:
         self.instructions = []
         self.symbol_table = {}
 
+    def _validate_instructions(self):
+        instruction_count = len(self.instructions)
+        for instruction in self.instructions:
+            error = validate_instruction_operands(
+                instruction['opcode'],
+                instruction['args'],
+                instruction_count=instruction_count,
+            )
+            if error:
+                raise AssemblerError(error, instruction.get('line_num'))
+
     def assemble(self, optimize=False):
-        # Step 1: Process includes
         tokens = self._process_includes(self.raw_tokens)
-
-        # Step 2: Parse constants & data directives (#define, EQU, .DATA)
         tokens = self._process_constants_and_data(tokens)
-
-        # Step 3: Process conditional compilation (#ifdef, #ifndef, #else, #endif)
         tokens = self._process_conditionals(tokens)
-
-        # Step 4: Expand macros
         tokens = self._process_macros(tokens)
 
-        # Step 5: Pass 1 - Register Labels
         inst_idx = 0
         filtered_tokens = []
         for token_line in tokens:
@@ -47,10 +52,10 @@ class Assembler:
                 label_name = first[:-1]
                 if not label_name.isidentifier() and not label_name.replace('.', '_').isidentifier():
                     raise AssemblerError(f"Invalid label name '{label_name}'", token_line.get('line_num'))
-                
+
                 self.labels[label_name] = inst_idx
                 self.symbol_table[label_name] = {'type': 'label', 'value': inst_idx}
-                
+
                 if len(parts) > 1:
                     token_line['parts'] = parts[1:]
                     filtered_tokens.append(token_line)
@@ -59,7 +64,6 @@ class Assembler:
                 filtered_tokens.append(token_line)
                 inst_idx += 1
 
-        # Step 6: Pass 2 - Generate bytecode instructions & resolve arguments
         self.instructions = []
         for token_line in filtered_tokens:
             parts = token_line['parts']
@@ -79,10 +83,8 @@ class Assembler:
 
             resolved_args = []
             for arg in raw_args:
-                # Check constant or label
                 if arg in self.constants:
-                    val = self.constants[arg]
-                    resolved_args.append(val)
+                    resolved_args.append(self.constants[arg])
                 elif arg in self.labels:
                     resolved_args.append(self.labels[arg])
                 else:
@@ -94,25 +96,24 @@ class Assembler:
             self.instructions.append({
                 'opcode': opcode,
                 'args': resolved_args,
-                'line_num': line_num
+                'line_num': line_num,
             })
 
-        # Step 7: Validate resolved operand types and control-flow targets.  This
-        # runs after the full program is known so jumps can be range checked.
-        instruction_count = len(self.instructions)
-        for instruction in self.instructions:
-            error = validate_instruction_operands(
-                instruction['opcode'],
-                instruction['args'],
-                instruction_count=instruction_count,
-            )
-            if error:
-                raise AssemblerError(error, instruction.get('line_num'))
+        self._validate_instructions()
 
         if optimize:
             from optimizer import Optimizer
             optimizer = Optimizer(self.instructions, self.labels)
             self.instructions = optimizer.optimize()
+            self.labels = dict(optimizer.labels)
+            for name, value in self.labels.items():
+                entry = self.symbol_table.get(name)
+                if entry and entry.get('type') == 'label':
+                    entry['value'] = value
+            # Optimization changes instruction indexes. Revalidate the final
+            # bytecode so stale/out-of-range control-flow targets can never
+            # escape into the VM or serialized compiler output.
+            self._validate_instructions()
 
         return self.instructions
 
@@ -128,7 +129,7 @@ class Assembler:
                 if len(parts) < 2:
                     raise AssemblerError("Missing include target file", t.get('line_num'))
                 target = parts[1].strip('"\'')
-                
+
                 inc_code = None
                 if target in self.stdlib:
                     inc_code = self.stdlib[target]
@@ -137,10 +138,10 @@ class Assembler:
                     if os.path.exists(inc_path):
                         with open(inc_path, 'r', encoding='utf-8') as f:
                             inc_code = f.read()
-                
+
                 if inc_code is None:
                     raise AssemblerError(f"Include file '{target}' not found", t.get('line_num'))
-                
+
                 from lexer import Lexer
                 sub_lexer = Lexer(inc_code)
                 sub_tokens = sub_lexer.tokenize()
@@ -151,7 +152,7 @@ class Assembler:
 
     def _process_conditionals(self, tokens):
         result = []
-        stack = [True]  # Track active branches
+        stack = [True]
 
         for t in tokens:
             parts = t['parts']
@@ -203,7 +204,7 @@ class Assembler:
                 in_macro = {
                     'name': macro_name,
                     'args': macro_args,
-                    'body': []
+                    'body': [],
                 }
                 continue
 
@@ -218,7 +219,6 @@ class Assembler:
                 in_macro['body'].append(t)
                 continue
 
-            # Macro invocation expansion
             if parts[0] in macro_defs:
                 m = macro_defs[parts[0]]
                 inv_args = parts[1:]
@@ -231,7 +231,7 @@ class Assembler:
                     filtered.append({
                         'line_num': t.get('line_num'),
                         'raw_line': body_tok.get('raw_line'),
-                        'parts': new_parts
+                        'parts': new_parts,
                     })
             else:
                 filtered.append(t)
@@ -249,7 +249,6 @@ class Assembler:
             parts = t['parts']
             first = parts[0].lower()
 
-            # #define KEY VALUE or @define KEY VALUE
             if first in ('#define', '@define'):
                 if len(parts) >= 3:
                     val_str = parts[2]
@@ -261,7 +260,6 @@ class Assembler:
                     self.symbol_table[parts[1]] = {'type': 'constant', 'value': val}
                 continue
 
-            # KEY EQU VALUE or KEY .EQU VALUE
             if len(parts) >= 3 and parts[1].lower() in ('equ', '.equ'):
                 try:
                     val = int(parts[2])
@@ -271,7 +269,6 @@ class Assembler:
                 self.symbol_table[parts[0]] = {'type': 'constant', 'value': val}
                 continue
 
-            # Data Directives: DB / DW / ARRAY
             if first in ('db', '.db', 'dw', '.dw', 'array', '.array'):
                 for item in parts[1:]:
                     try:
