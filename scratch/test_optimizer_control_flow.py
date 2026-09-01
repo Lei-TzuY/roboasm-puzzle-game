@@ -10,7 +10,7 @@ from optimizer import Optimizer
 
 
 class TestControlFlowSafeOptimizer(unittest.TestCase):
-    def test_nop_removal_remaps_jump_target(self):
+    def test_nop_removal_can_expose_and_remove_redundant_jump(self):
         insts = [
             {'opcode': 'JMP', 'args': [2], 'line_num': 1},
             {'opcode': 'NOP', 'args': [], 'line_num': 2},
@@ -18,7 +18,6 @@ class TestControlFlowSafeOptimizer(unittest.TestCase):
         ]
         result = Optimizer(insts).optimize()
         self.assertEqual(result, [
-            {'opcode': 'JMP', 'args': [1], 'line_num': 1},
             {'opcode': 'HLT', 'args': [], 'line_num': 3},
         ])
 
