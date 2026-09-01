@@ -11,8 +11,8 @@ from runtime_api import execute_level_code
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 NODE_RUNNER = os.path.join(ROOT_DIR, 'scratch', 'js_runtime_runner.js')
 
-# Keep this corpus intentionally representative rather than redundant.  Each
-# case exercises a materially different part of the shared language/runtime.
+# Keep this corpus intentionally representative rather than redundant. Each
+# bundled case exercises a materially different part of the shared runtime.
 DIFFERENTIAL_CASES = [
     ('movement-item-win', 1, 100),
     ('inbox-arithmetic-loop', 2, 200),
@@ -25,6 +25,48 @@ DIFFERENTIAL_CASES = [
     ('button-door-portal-stack', 20, 200),
     ('four-robot-ipc', 24, 150),
     ('dual-robot-finale', 35, 150),
+]
+
+# These micro-programs pin language semantics that differ naturally between
+# JavaScript and Python and therefore need explicit compatibility coverage.
+INLINE_CASES = [
+    {
+        'name': 'noop-alias',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': 'MOV 1 R0\nNOOP\nINC R0\nHLT\n',
+        'max_cycles': 10,
+        'optimize': False,
+    },
+    {
+        'name': 'negative-modulo',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': 'MOV -5 R0\nMOD 3 R0\nHLT\n',
+        'max_cycles': 10,
+        'optimize': False,
+    },
+    {
+        'name': 'wide-bitwise',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': (
+            'MOV 1099511627776 R0\n'
+            'OR 1 R0\n'
+            'XOR 3 R0\n'
+            'HLT\n'
+        ),
+        'max_cycles': 10,
+        'optimize': False,
+    },
+    {
+        'name': 'negative-shift-fault',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': 'MOV 8 R0\nSHL R0 -1\nHLT\n',
+        'max_cycles': 10,
+        'optimize': False,
+    },
 ]
 
 
@@ -57,7 +99,10 @@ def normalize_snapshot(snapshot):
         # integer-addressed RAM dictionary to the same representation.
         'ram': {
             str(key): value
-            for key, value in sorted(snapshot.get('ram', {}).items(), key=lambda item: int(item[0]))
+            for key, value in sorted(
+                snapshot.get('ram', {}).items(),
+                key=lambda item: int(item[0]),
+            )
         },
         'messages': [
             {
@@ -72,7 +117,10 @@ def normalize_snapshot(snapshot):
             'items': sorted(snapshot['grid'].get('items', []), key=_coord_key),
             'inboxes': sorted(snapshot['grid'].get('inboxes', []), key=_coord_key),
             'outboxes': sorted(snapshot['grid'].get('outboxes', []), key=_coord_key),
-            'open_doors': sorted(snapshot['grid'].get('open_doors', []), key=_coord_key),
+            'open_doors': sorted(
+                snapshot['grid'].get('open_doors', []),
+                key=_coord_key,
+            ),
         },
     }
 
@@ -80,7 +128,11 @@ def normalize_snapshot(snapshot):
 def load_cases():
     cases = []
     for name, level_number, max_cycles in DIFFERENTIAL_CASES:
-        solution_path = os.path.join(ROOT_DIR, 'solutions', f'level{level_number}.asm')
+        solution_path = os.path.join(
+            ROOT_DIR,
+            'solutions',
+            f'level{level_number}.asm',
+        )
         with open(solution_path, 'r', encoding='utf-8') as handle:
             code = handle.read()
         cases.append({
@@ -91,6 +143,7 @@ def load_cases():
             'max_cycles': max_cycles,
             'optimize': False,
         })
+    cases.extend(dict(case) for case in INLINE_CASES)
     return cases
 
 
@@ -132,7 +185,10 @@ class TestCrossRuntimeDifferential(unittest.TestCase):
                 self.assertEqual(
                     web_result['status'],
                     'success',
-                    web_result.get('error', 'Web runtime failed without an error message'),
+                    web_result.get(
+                        'error',
+                        'Web runtime failed without an error message',
+                    ),
                 )
 
                 level_path = os.path.join(ROOT_DIR, 'levels', case['level'])
