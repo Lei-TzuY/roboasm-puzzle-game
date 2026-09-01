@@ -179,6 +179,8 @@
     const code = document.getElementById('code').value;
     const maxCyclesInput = document.getElementById('authority-max-cycles');
     const maxCycles = Number(maxCyclesInput ? maxCyclesInput.value : 1000);
+    const optimizeInput = document.getElementById('chk-opt');
+    const optimize = !!(optimizeInput && optimizeInput.checked);
 
     const response = await fetch('/api/run', {
       method: 'POST',
@@ -187,7 +189,8 @@
         level: def.filename,
         code,
         max_cycles: maxCycles,
-        capture_trace: !!captureTrace
+        capture_trace: !!captureTrace,
+        optimize
       })
     });
 
@@ -218,6 +221,7 @@
       const tone = payload.won ? 'ok' : 'warn';
       const faultCount = payload.execution && payload.execution.faults
         ? payload.execution.faults.length : 0;
+      const compileMode = payload.optimized ? 'optimized' : 'unoptimized';
 
       let diffHtml;
       if (!diff.comparable) {
@@ -229,7 +233,7 @@
       }
 
       setAuthorityStatus(
-        `<strong>Python ${authority}</strong> · ${payload.cycles} cycles · ${payload.size} instructions · ${faultCount} faults` +
+        `<strong>Python ${authority}</strong> · ${payload.cycles} cycles · ${payload.size} instructions · ${compileMode} · ${faultCount} faults` +
         `<div style="margin-top:4px">${esc(payload.message || '')}</div>${diffHtml}`,
         tone
       );
@@ -271,7 +275,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <strong style="color:#58a6ff">Authoritative Python Runtime</strong>
         <label style="color:#8b949e">Max cycles <input id="authority-max-cycles" type="number" min="0" max="2000" value="1000" style="width:74px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"></label>
-        <span style="color:#6e7681">Trace is capped at 2000 cycles.</span>
+        <span style="color:#6e7681">Server Verify mirrors the IDE Optimize checkbox. Trace is capped at 2000 cycles.</span>
       </div>
       <div id="${STATUS_ID}" style="color:#8b949e">Use Server Verify to validate against the Python runtime.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
