@@ -9,6 +9,7 @@ from http.server import HTTPServer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from debug_expressions import DebugExpressionError, compile_debug_expression
 from debug_sessions import DebugSession
 from web_server import RoboASMRequestHandler
 
@@ -42,6 +43,7 @@ class TestBreakpointAwareDebugRun(unittest.TestCase):
         self.assertTrue(stopped['execution']['stopped_by_breakpoint'])
         self.assertFalse(stopped['execution']['limit_reached'])
         self.assertEqual(stopped['execution']['breakpoint'], {
+            'kind': 'line',
             'robot_id': 0,
             'pc': 2,
             'line_num': 5,
@@ -77,6 +79,107 @@ class TestBreakpointAwareDebugRun(unittest.TestCase):
         self.assertEqual(result['execution']['cycles_executed'], 1)
         self.assertFalse(result['execution']['stopped_by_breakpoint'])
         self.assertTrue(result['execution']['limit_reached'])
+
+    def test_conditional_breakpoint_uses_safe_authoritative_state(self):
+        session = DebugSession(
+            'MOV 1 R0\nINC R0\nINC R0\nHLT',
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        stopped = session.run(
+            max_cycles=20,
+            conditional_breakpoints=[{
+                'line_num': 3,
+                'condition': 'R0 == 2 and PC == 2 and CYCLES == 2',
+                'robot_id': 0,
+            }],
+        )
+        self.assertEqual(stopped['cycles'], 2)
+        self.assertFalse(stopped['terminal'])
+        self.assertTrue(stopped['execution']['stopped_by_breakpoint'])
+        hit = stopped['execution']['breakpoint']
+        self.assertEqual(hit['kind'], 'conditional')
+        self.assertEqual(hit['line_num'], 3)
+        self.assertEqual(hit['condition'], 'R0 == 2 and PC == 2 and CYCLES == 2')
+        self.assertEqual(stopped['state']['robots'][0]['registers']['R0'], 2)
+
+        crossed = session.step(1)
+        self.assertEqual(crossed['cycles'], 3)
+        self.assertEqual(crossed['state']['robots'][0]['registers']['R0'], 3)
+
+    def test_register_and_ram_watchpoints_stop_after_mutation_and_rewind(self):
+        register_session = DebugSession(
+            'MOV 4 R0\nHLT',
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        changed = register_session.run(
+            max_cycles=10,
+            watchpoints=[{'kind': 'register', 'robot_id': 0, 'name': 'R0'}],
+        )
+        self.assertEqual(changed['cycles'], 1)
+        self.assertTrue(changed['execution']['stopped_by_watchpoint'])
+        self.assertEqual(changed['execution']['watchpoint'], {
+            'kind': 'register',
+            'robot_id': 0,
+            'name': 'R0',
+            'old_exists': True,
+            'old_value': 0,
+            'new_exists': True,
+            'new_value': 4,
+            'cycle': 1,
+        })
+
+        ram_session = DebugSession(
+            'MOV 0 R0\nMOV 7 R1\nSTORE R1 R0\nHLT',
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        stored = ram_session.run(
+            max_cycles=10,
+            watchpoints=[{'kind': 'ram', 'address': 0}],
+        )
+        self.assertEqual(stored['cycles'], 3)
+        self.assertTrue(stored['execution']['stopped_by_watchpoint'])
+        hit = stored['execution']['watchpoint']
+        self.assertEqual(hit['kind'], 'ram')
+        self.assertEqual(hit['address'], 0)
+        self.assertFalse(hit['old_exists'])
+        self.assertIsNone(hit['old_value'])
+        self.assertTrue(hit['new_exists'])
+        self.assertEqual(hit['new_value'], 7)
+        self.assertEqual(stored['state']['ram'][0], 7)
+
+        backed = ram_session.step(-1)
+        self.assertEqual(backed['cycles'], 2)
+        self.assertNotIn(0, backed['state']['ram'])
+
+    def test_debug_conditions_reject_code_execution_and_invalid_watchpoints(self):
+        for source in (
+            '__import__("os")',
+            'R0.__class__',
+            '[R0][0]',
+            'open(1)',
+            '"text" == "text"',
+        ):
+            with self.subTest(source=source):
+                with self.assertRaises(DebugExpressionError):
+                    compile_debug_expression(source)
+
+        session = DebugSession('NOP\nHLT', LEVEL_PATH, source_base_dir=ROOT_DIR)
+        invalid_runs = [
+            {'conditional_breakpoints': 'bad'},
+            {'conditional_breakpoints': [{'line_num': 1, 'condition': 'R9 == 1'}]},
+            {'conditional_breakpoints': [{'line_num': 0, 'condition': 'R0 == 1'}]},
+            {'watchpoints': 'R0'},
+            {'watchpoints': [{'kind': 'register', 'name': 'R9'}]},
+            {'watchpoints': [{'kind': 'ram', 'address': True}]},
+            {'watchpoints': [{'kind': 'unknown'}]},
+        ]
+        for kwargs in invalid_runs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    session.run(max_cycles=1, **kwargs)
 
     def test_breakpoint_validation_rejects_ambiguous_or_invalid_inputs(self):
         session = DebugSession('NOP\nHLT', LEVEL_PATH, source_base_dir=ROOT_DIR)
