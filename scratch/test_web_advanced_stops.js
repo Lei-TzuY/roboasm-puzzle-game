@@ -156,7 +156,10 @@ vmModule.runInContext(source, sandbox, {filename: 'web_runtime_compat.js'});
   assert.strictEqual(watchPayload.execution.stopped_by_watchpoint, true);
   assert.strictEqual(stopCount, 1, 'watchpoint response should pause authoritative Run');
   assert.ok(messages.some(entry => entry.text.includes('RAM[4]') && entry.text.includes('1') && entry.text.includes('9')));
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(requests[0].body.breakpoint_lines)), spec);
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(requests[0].body.breakpoint_lines)),
+    JSON.parse(JSON.stringify(spec))
+  );
 
   mode = 'conditional';
   const conditionalResponse = await sandbox.fetch('/api/debug/sessions/session-123/run', {
