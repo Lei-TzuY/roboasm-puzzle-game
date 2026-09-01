@@ -58,6 +58,14 @@ class TestControlFlowSafeOptimizer(unittest.TestCase):
                 self.assertGreaterEqual(inst['args'][0], 0)
                 self.assertLessEqual(inst['args'][0], count)
 
+    def test_optimized_symbol_table_tracks_remapped_label(self):
+        code = 'NOP\nstart: MOV 5 R0\nADD 3 R0\nHLT\n'
+        assembler = Assembler(Lexer(code).tokenize())
+        instructions = assembler.assemble(optimize=True)
+        self.assertEqual(instructions[0]['args'], [8, 'R0'])
+        self.assertEqual(assembler.labels['start'], 0)
+        self.assertEqual(assembler.symbol_table['start']['value'], 0)
+
     def test_trailing_exit_target_survives_compaction(self):
         code = 'NOP\nJMP done\nMOV 7 R0\ndone:\n'
         instructions = Assembler(Lexer(code).tokenize()).assemble(optimize=True)
