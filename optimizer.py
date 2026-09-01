@@ -7,7 +7,9 @@ class Optimizer:
 
     Every pass that changes instruction indexes rebuilds numeric branch/call
     targets and label indexes. Constant folding is deliberately blocked across
-    a secondary instruction that is itself an entry target.
+    a secondary instruction that is itself an entry target. The pass pipeline
+    is iterated to a bounded fixed point so one optimize() invocation is
+    idempotent even when one rewrite exposes another optimization opportunity.
     """
 
     def __init__(self, instructions, labels=None):
@@ -24,13 +26,27 @@ class Optimizer:
         insts = [self._copy_instruction(i) for i in self.instructions]
         labels = dict(self.labels)
 
-        insts, labels = self._remove_nops(insts, labels)
-        insts, labels = self._constant_folding(insts, labels)
-        insts, labels = self._remove_redundant_jumps(insts, labels)
-        insts, labels = self._remove_dead_code(insts, labels)
+        # Every productive pass either removes instructions or changes a
+        # foldable instruction while also removing its arithmetic partner.
+        # Two rounds per original instruction plus a small constant is therefore
+        # a deliberately generous convergence guard, not a normal exit path.
+        max_rounds = max(1, 2 * len(insts) + 2)
+        for _ in range(max_rounds):
+            before_insts = [self._copy_instruction(i) for i in insts]
+            before_labels = dict(labels)
 
-        self.labels = labels
-        return insts
+            insts, labels = self._remove_nops(insts, labels)
+            insts, labels = self._constant_folding(insts, labels)
+            insts, labels = self._remove_redundant_jumps(insts, labels)
+            insts, labels = self._remove_dead_code(insts, labels)
+
+            if insts == before_insts and labels == before_labels:
+                self.labels = labels
+                return insts
+
+        raise RuntimeError(
+            f"Optimizer did not converge after {max_rounds} rounds"
+        )
 
     @staticmethod
     def _entry_targets(insts, labels):
