@@ -6,11 +6,13 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from assembler import Assembler, AssemblerError
+from debug_sessions import DebugSessionManager, DebugSessionNotFound
 from disassembler import Disassembler
 from lexer import Lexer, LexerError
 from runtime_api import execute_level_code
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEBUG_SESSIONS = DebugSessionManager()
 WEB_ASSET_NAMES = {
     'web_optimizer.js',
     'web_preprocessor.js',
@@ -32,6 +34,22 @@ def resolve_level_path(level_file):
     if not os.path.isfile(level_path):
         raise FileNotFoundError(f"Level '{safe_name}' not found")
     return level_path
+
+
+def parse_debug_session_path(path):
+    """Return ``(session_id, action)`` for debugger-session resource paths."""
+    prefix = '/api/debug/sessions/'
+    if not path.startswith(prefix):
+        return None
+    remainder = path[len(prefix):].strip('/')
+    if not remainder:
+        return None
+    parts = remainder.split('/')
+    if len(parts) == 1:
+        return parts[0], None
+    if len(parts) == 2 and parts[1] in ('step', 'run'):
+        return parts[0], parts[1]
+    return None
 
 
 def collect_web_include_sources():
@@ -107,6 +125,8 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
     def _read_json(self):
         content_length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(content_length)
+        if not raw:
+            return {}
         try:
             payload = json.loads(raw.decode('utf-8'))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -115,10 +135,32 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be a JSON object")
         return payload
 
+    def _debug_session(self, session_id):
+        try:
+            return DEBUG_SESSIONS.get(session_id)
+        except DebugSessionNotFound as exc:
+            self._send_json(404, {
+                'status': 'error',
+                'error': str(exc.args[0] if exc.args else exc),
+            })
+            return None
+
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
+
+        debug_route = parse_debug_session_path(path)
+        if debug_route is not None and debug_route[1] is None:
+            session_id, _ = debug_route
+            session = self._debug_session(session_id)
+            if session is not None:
+                self._send_json(200, {
+                    'status': 'success',
+                    'session_id': session_id,
+                    **session.snapshot(),
+                })
+            return
 
         if path in ('/', '/index.html', '/web_ui.html'):
             ui_path = os.path.join(ROOT_DIR, 'web_ui.html')
@@ -186,6 +228,67 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
+        debug_route = parse_debug_session_path(path)
+
+        if path == '/api/debug/sessions':
+            try:
+                data = self._read_json()
+                level_path = resolve_level_path(data.get('level'))
+                session_id, session = DEBUG_SESSIONS.create(
+                    data.get('code', ''),
+                    level_path,
+                    optimize=data.get('optimize', False),
+                    source_base_dir=ROOT_DIR,
+                )
+                self._send_json(201, {
+                    'status': 'success',
+                    'session_id': session_id,
+                    **session.snapshot(),
+                })
+            except FileNotFoundError as exc:
+                self._send_json(404, {'status': 'error', 'error': str(exc)})
+            except (LexerError, AssemblerError) as exc:
+                self._send_json(400, {
+                    'status': 'error',
+                    'error': str(exc),
+                    'line_num': getattr(exc, 'line_num', None),
+                })
+            except ValueError as exc:
+                self._send_json(400, {'status': 'error', 'error': str(exc)})
+            except Exception as exc:
+                self._send_json(500, {
+                    'status': 'error',
+                    'error': f"Internal debugger-session error: {exc}",
+                })
+            return
+
+        if debug_route is not None and debug_route[1] in ('step', 'run'):
+            session_id, action = debug_route
+            session = self._debug_session(session_id)
+            if session is None:
+                return
+            try:
+                data = self._read_json()
+                if action == 'step':
+                    result = session.step(data.get('cycles', 1))
+                else:
+                    result = session.run(
+                        max_cycles=data.get('max_cycles', 1_000),
+                        capture_trace=data.get('capture_trace', False),
+                    )
+                self._send_json(200, {
+                    'status': 'success',
+                    'session_id': session_id,
+                    **result,
+                })
+            except ValueError as exc:
+                self._send_json(400, {'status': 'error', 'error': str(exc)})
+            except Exception as exc:
+                self._send_json(500, {
+                    'status': 'error',
+                    'error': f"Internal debugger-session error: {exc}",
+                })
+            return
 
         if path == '/api/assemble':
             try:
@@ -313,6 +416,26 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"status": "error", "error": f"Error saving profile: {exc}"})
         else:
             self.send_error(404, "Not found")
+
+    def do_DELETE(self):
+        path = urllib.parse.urlparse(self.path).path
+        debug_route = parse_debug_session_path(path)
+        if debug_route is None or debug_route[1] is not None:
+            self.send_error(404, "Not found")
+            return
+
+        session_id, _ = debug_route
+        if DEBUG_SESSIONS.delete(session_id):
+            self._send_json(200, {
+                'status': 'success',
+                'session_id': session_id,
+                'deleted': True,
+            })
+        else:
+            self._send_json(404, {
+                'status': 'error',
+                'error': 'Debugger session not found or expired',
+            })
 
 
 def start_web_server(port=8000):
