@@ -18,6 +18,7 @@ jobs:
       - run: python -m compileall -q .
       - name: Validate Web IDE JavaScript
         run: |
+          node --check web_runtime_compat.js
           node --check web_authority.js
           node --check scratch/js_runtime_runner.js
       - name: Validate level definitions
