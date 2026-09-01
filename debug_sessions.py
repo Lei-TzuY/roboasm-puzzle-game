@@ -105,6 +105,45 @@ class DebugSession:
     def _remember_checkpoint(self):
         self._history.append(self.vm.snapshot())
 
+    def _normalize_breakpoints(self, breakpoint_lines, breakpoint_robot_id):
+        if breakpoint_lines is None:
+            lines = set()
+        else:
+            if not isinstance(breakpoint_lines, (list, tuple, set)):
+                raise ValueError("breakpoint_lines must be an array of positive integers")
+            lines = set()
+            for line in breakpoint_lines:
+                if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+                    raise ValueError(
+                        "breakpoint_lines must contain only positive integers"
+                    )
+                lines.add(line)
+
+        if not isinstance(breakpoint_robot_id, int) \
+                or isinstance(breakpoint_robot_id, bool):
+            raise ValueError("breakpoint_robot_id must be an integer")
+        if breakpoint_robot_id < 0 or breakpoint_robot_id >= len(self.vm.robots):
+            raise ValueError("breakpoint_robot_id does not reference an active robot")
+        return lines, breakpoint_robot_id
+
+    def _current_breakpoint(self, breakpoint_lines, breakpoint_robot_id):
+        """Return breakpoint metadata if the selected robot is paused before a line."""
+        if self.vm.cycles <= 0 or not breakpoint_lines:
+            return None
+        robot = self.vm.robots[breakpoint_robot_id]
+        if robot.halted or robot.pc < 0 or robot.pc >= len(self.instructions):
+            return None
+        instruction = self.instructions[robot.pc]
+        line_num = instruction.get('line_num')
+        if line_num not in breakpoint_lines:
+            return None
+        return {
+            'robot_id': breakpoint_robot_id,
+            'pc': robot.pc,
+            'line_num': line_num,
+            'cycle': self.vm.cycles,
+        }
+
     def snapshot(self):
         """Return the current persistent session state and compile metadata."""
         won, message = self._win_status()
@@ -130,6 +169,8 @@ class DebugSession:
             'total_cycles': self.vm.cycles,
             'halted': self.vm.halted,
             'stopped_by_condition': bool(won),
+            'stopped_by_breakpoint': False,
+            'breakpoint': None,
             'limit_reached': False,
             'faults': deepcopy(self.vm.faults),
         }
@@ -137,12 +178,22 @@ class DebugSession:
             result['trace'] = [self.vm.snapshot()]
         return result
 
-    def advance(self, max_cycles=1, capture_trace=False):
-        """Advance this existing VM while checkpointing every executed cycle."""
+    def advance(
+        self,
+        max_cycles=1,
+        capture_trace=False,
+        breakpoint_lines=None,
+        breakpoint_robot_id=0,
+    ):
+        """Advance this VM, checkpointing cycles and optionally stopping before a breakpoint."""
         validate_run_options(
             max_cycles=max_cycles,
             capture_trace=capture_trace,
             optimize=self.optimize,
+        )
+        breakpoint_lines, breakpoint_robot_id = self._normalize_breakpoints(
+            breakpoint_lines,
+            breakpoint_robot_id,
         )
         won, _ = self._win_status()
         if won or self.vm.halted:
@@ -154,9 +205,17 @@ class DebugSession:
 
         start_cycles = self.vm.cycles
         stopped_by_condition = False
+        breakpoint_hit = None
         trace = [self.vm.snapshot()] if capture_trace else None
 
         while not self.vm.halted and self.vm.cycles - start_cycles < max_cycles:
+            breakpoint_hit = self._current_breakpoint(
+                breakpoint_lines,
+                breakpoint_robot_id,
+            )
+            if breakpoint_hit is not None:
+                break
+
             self._remember_checkpoint()
             self.vm.step()
             if capture_trace:
@@ -166,14 +225,18 @@ class DebugSession:
                 break
 
         executed = self.vm.cycles - start_cycles
+        stopped_by_breakpoint = breakpoint_hit is not None
         execution = {
             'cycles_executed': executed,
             'total_cycles': self.vm.cycles,
             'halted': self.vm.halted,
             'stopped_by_condition': stopped_by_condition,
+            'stopped_by_breakpoint': stopped_by_breakpoint,
+            'breakpoint': breakpoint_hit,
             'limit_reached': (
                 not self.vm.halted
                 and not stopped_by_condition
+                and not stopped_by_breakpoint
                 and executed >= max_cycles
             ),
             'faults': deepcopy(self.vm.faults),
@@ -228,12 +291,20 @@ class DebugSession:
             return self.rewind(-cycles)
         return self.advance(max_cycles=cycles, capture_trace=False)
 
-    def run(self, max_cycles=1_000, capture_trace=False):
+    def run(
+        self,
+        max_cycles=1_000,
+        capture_trace=False,
+        breakpoint_lines=None,
+        breakpoint_robot_id=0,
+    ):
         # Central validation keeps this endpoint aligned with /api/run,
         # including boolean/type checks and the stricter trace budget.
         return self.advance(
             max_cycles=max_cycles,
             capture_trace=capture_trace,
+            breakpoint_lines=breakpoint_lines,
+            breakpoint_robot_id=breakpoint_robot_id,
         )
 
 

@@ -13,8 +13,8 @@ function response(status, payload) {
   };
 }
 
-function snapshot(cycles, {won = false, halted = false, historyDepth = cycles} = {}) {
-  return {
+function snapshot(cycles, {won = false, halted = false, historyDepth = cycles, execution = null} = {}) {
+  const payload = {
     status: 'success',
     session_id: 'session-123',
     won,
@@ -57,6 +57,8 @@ function snapshot(cycles, {won = false, halted = false, historyDepth = cycles} =
       },
     },
   };
+  if (execution) payload.execution = execution;
+  return payload;
 }
 
 const controls = new Map();
@@ -77,7 +79,7 @@ control('btn-stop', {disabled: true});
 control('code', {value: 'MOV 1 R0\nHLT\n'});
 control('chk-opt', {checked: false});
 control('stars-display', {innerHTML: ''});
-control('speed', {value: '100'});
+control('speed', {value: '10'});
 
 const document = {
   readyState: 'complete',
@@ -135,6 +137,12 @@ async function fetchMock(url, options = {}) {
         won: serverCycle >= 2,
         halted: serverCycle >= 2,
         historyDepth: serverHistory.length,
+        execution: {
+          cycles_executed: 1,
+          total_cycles: serverCycle,
+          stopped_by_breakpoint: false,
+          breakpoint: null,
+        },
       }));
     }
     if (body.cycles === -1) {
@@ -152,6 +160,33 @@ async function fetchMock(url, options = {}) {
         },
       });
     }
+  }
+  if (url === '/api/debug/sessions/session-123/run' && options.method === 'POST') {
+    const body = JSON.parse(options.body || '{}');
+    assert.strictEqual(body.max_cycles, 16, 'speed 10 should request a conservative 16-cycle chunk');
+    assert.deepStrictEqual(body.breakpoint_lines, [], 'empty breakpoint set must be forwarded explicitly');
+    assert.strictEqual(body.breakpoint_robot_id, 0);
+
+    const start = serverCycle;
+    while (serverCycle < 2 && serverCycle - start < body.max_cycles) {
+      serverHistory.push(serverCycle);
+      serverCycle += 1;
+    }
+    const won = serverCycle >= 2;
+    return response(200, snapshot(serverCycle, {
+      won,
+      halted: won,
+      historyDepth: serverHistory.length,
+      execution: {
+        cycles_executed: serverCycle - start,
+        total_cycles: serverCycle,
+        stopped_by_condition: won,
+        stopped_by_breakpoint: false,
+        breakpoint: null,
+        limit_reached: !won && serverCycle - start >= body.max_cycles,
+        faults: [],
+      },
+    }));
   }
   if (url === '/api/debug/sessions/session-123' && options.method === 'DELETE') {
     return response(200, {status: 'success', deleted: true});
@@ -205,6 +240,11 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
 
 (async () => {
   assert.strictEqual(controls.get('btn-back').disabled, true, 'cycle zero has no reverse checkpoint');
+  assert.strictEqual(
+    sandbox.ROBOASM_AUTHORITY_INTERNALS.debugRunChunkSize(),
+    16,
+    'controller should expose deterministic speed-to-chunk sizing'
+  );
 
   await sandbox.compileAndReset();
   assert.strictEqual(requests[0].url, '/api/debug/sessions');
@@ -228,7 +268,7 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
 
   sandbox.runAuto();
   await new Promise(resolve => setTimeout(resolve, 80));
-  assert.strictEqual(sandbox.vm.cycles, 2, 'Run must continue the same persistent session');
+  assert.strictEqual(sandbox.vm.cycles, 2, 'Run chunk must continue the same persistent session');
   assert.strictEqual(sandbox.vm.halted, true);
   assert.strictEqual(sandbox.renderedStars, true);
   assert.strictEqual(controls.get('btn-run').disabled, false);
@@ -249,11 +289,16 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
   assert.strictEqual(sandbox.vm.halted, true);
 
   const createCount = requests.filter(entry => entry.url === '/api/debug/sessions').length;
-  assert.strictEqual(createCount, 1, 'Step, Run, and Step Back must stay on one authoritative session');
+  assert.strictEqual(createCount, 1, 'Step, batched Run, and Step Back must stay on one authoritative session');
   const stepBodies = requests
     .filter(entry => entry.url.endsWith('/step'))
     .map(entry => JSON.parse(entry.options.body).cycles);
-  assert.deepStrictEqual(stepBodies, [1, 1, -1, 1], 'timeline should execute forward, rewind, then branch forward');
+  assert.deepStrictEqual(stepBodies, [1, -1], 'manual stepping and rewind stay signed /step operations');
+  const runBodies = requests
+    .filter(entry => entry.url.endsWith('/run'))
+    .map(entry => JSON.parse(entry.options.body));
+  assert.strictEqual(runBodies.length, 2, 'each Run phase should need one server chunk for this program');
+  assert.ok(runBodies.every(body => body.max_cycles === 16));
 
   console.log('Web authoritative debugger controller integration: PASS');
 })().catch(error => {

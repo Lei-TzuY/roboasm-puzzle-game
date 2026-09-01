@@ -7,6 +7,7 @@
   const TRACE_SLIDER_ID = 'authority-trace-slider';
   const TRACE_LABEL_ID = 'authority-trace-label';
   const DEBUG_BASE = '/api/debug/sessions';
+  const MAX_RUN_CHUNK = 32;
 
   let debugSessionId = null;
   let debugRunTimer = null;
@@ -300,6 +301,21 @@
     updateBackButton(running);
   }
 
+  function debugRunChunkSize() {
+    if (typeof document === 'undefined') return 1;
+    const speedInput = document.getElementById('speed');
+    const parsed = parseInt(speedInput ? speedInput.value : '1', 10);
+    const speed = Math.min(10, Math.max(1, Number.isFinite(parsed) ? parsed : 1));
+    return Math.min(MAX_RUN_CHUNK, 2 ** Math.floor((speed - 1) / 2));
+  }
+
+  function breakpointLineList() {
+    if (typeof breakpoints === 'undefined' || !breakpoints) return [];
+    return [...breakpoints]
+      .filter(line => Number.isInteger(line) && line > 0)
+      .sort((a, b) => a - b);
+  }
+
   function finishAuthoritativeState(payload) {
     if (payload.won) {
       stopAuthoritativeRun();
@@ -456,19 +472,44 @@
       return;
     }
 
+    const speed = Math.max(1, parseInt(document.getElementById('speed').value, 10) || 1);
+    const chunkCycles = debugRunChunkSize();
     debugRequestBusy = true;
     updateBackButton();
     const sessionId = debugSessionId;
     try {
-      const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
+      const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/run`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({cycles: 1}),
+        body: JSON.stringify({
+          max_cycles: chunkCycles,
+          capture_trace: false,
+          breakpoint_lines: breakpointLineList(),
+          breakpoint_robot_id: selectedRobot,
+        }),
       });
-      if (!debugRunActive || sessionId !== debugSessionId) return;
+      if (sessionId !== debugSessionId) return;
+
+      // A Pause may happen while a chunk request is in flight. Always hydrate
+      // the committed canonical state before honoring the paused controller
+      // flag, otherwise the browser would remain behind the Python timeline.
       hydrateBrowserFromPython(payload, false);
+
+      const execution = payload.execution || {};
+      if (execution.stopped_by_breakpoint) {
+        stopAuthoritativeRun();
+        const hit = execution.breakpoint || {};
+        setMsg(`Breakpoint hit on line ${hit.line_num ?? '?'}`, 'msg-err');
+        setAuthorityStatus(`<strong>Breakpoint</strong> · robot ${hit.robot_id ?? selectedRobot} · cycle ${payload.cycles} · PC ${hit.pc ?? '?'}`, 'warn');
+        return;
+      }
+
+      if (!debugRunActive) {
+        setAuthorityStatus(`<strong>Python Run paused</strong> · authoritative chunk committed through cycle ${payload.cycles}`, 'info');
+        return;
+      }
       if (finishAuthoritativeState(payload)) return;
-      const speed = Math.max(1, parseInt(document.getElementById('speed').value, 10) || 1);
+
       const interval = Math.max(20, 500 / speed);
       debugRunTimer = setTimeout(authoritativeRunTick, interval);
     } catch (error) {
@@ -488,7 +529,7 @@
     if (!vm || vm.halted) return;
     debugRunActive = true;
     updateRunButtons(true);
-    setAuthorityStatus(`<strong>Python Run</strong> · persistent session · cycle ${vm.cycles}`, 'info');
+    setAuthorityStatus(`<strong>Python Run</strong> · persistent session · cycle ${vm.cycles} · chunk ≤${debugRunChunkSize()} cycles`, 'info');
     authoritativeRunTick();
   }
 
@@ -582,7 +623,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <strong style="color:#58a6ff">Authoritative Python Runtime</strong>
         <label style="color:#8b949e">Max cycles <input id="authority-max-cycles" type="number" min="0" max="2000" value="1000" style="width:74px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"></label>
-        <span style="color:#6e7681">HTTP IDE Compile / Step / Run / Step Back share one persistent Python VM timeline. Server Verify remains an independent replay check.</span>
+        <span style="color:#6e7681">HTTP IDE Compile / Step / Run / Step Back share one persistent Python VM timeline. Run uses breakpoint-aware server chunks; Server Verify remains an independent replay check.</span>
       </div>
       <div id="${STATUS_ID}" style="color:#8b949e">Authoritative debugger controller installed.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
@@ -621,6 +662,8 @@
     coordEntriesToObject,
     serverTerminalProjection,
     jsonStable,
+    debugRunChunkSize,
+    breakpointLineList,
   });
 
   if (typeof document !== 'undefined') {

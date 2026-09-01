@@ -66,17 +66,21 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Positive `step` cycles advance the timeline; negative cycles restore authoritative checkpoints for real reverse debugging.
   - Retains up to 256 full VM checkpoints per session, including robot state, stacks, shared RAM, IPC, grid items/inboxes/outboxes, open doors, halt/fault state, and cycle count.
   - Rewind preserves the shared-RAM object identity used by every robot and can recover from terminal wins or runtime faults without creating a new session.
+  - Breakpoint-aware `run` accepts source-line breakpoints plus the selected robot, checks them before each next cycle, and stops with structured robot/PC/line/cycle metadata before executing the breakpointed instruction.
+  - Every cycle executed inside a multi-cycle `run` chunk still records its own reverse checkpoint, so batching does not reduce Step Back fidelity.
   - Uses opaque session IDs, a 30-minute inactivity TTL, a 32-session cap, LRU eviction, and a thread-safe registry.
   - Reuses the same compiler/level/VM preparation path as `/api/run`, so optimizer and include semantics stay authoritative.
-  - Session tests exercise real localhost HTTP forward/rewind persistence, terminal replay, fault recovery, bounded history, TTL refresh/expiration, LRU eviction, compile diagnostics, and budget validation.
+  - Session tests exercise real localhost HTTP forward/rewind persistence, breakpoint stops, terminal replay, fault recovery, bounded history, TTL refresh/expiration, LRU eviction, compile diagnostics, and request validation.
 
 - **Authoritative Web Debugger Controller (`web_authority.js`)**:
   - On the canonical HTTP IDE path, the existing **Compile**, **Step**, **Run**, **Pause**, and **Step Back** controls are rebound to one persistent Python debugger timeline instead of executing the duplicated browser VM.
-  - Python snapshots hydrate the existing grid, register/flag, stack, RAM, IPC, outbox, door, PC, cycle, and instruction inspectors after every authoritative forward or reverse step.
-  - **Run** advances the same Python session one cycle at a time, preserving the existing speed control, line breakpoints, and immediate Pause behavior without replaying from cycle zero.
+  - Python snapshots hydrate the existing grid, register/flag, stack, RAM, IPC, outbox, door, PC, cycle, and instruction inspectors after every authoritative forward or reverse operation.
+  - **Run** uses adaptive server chunks instead of one HTTP request per cycle. With the current 1–10 speed slider it requests 1–16 cycles at a time and the server stops each chunk on a breakpoint, terminal state, or budget.
+  - Source-line breakpoint semantics stay compatible with the previous IDE: cycle-zero breakpoints are ignored, the selected robot determines breakpoint hits, and a manual **Step** can cross a paused breakpoint.
+  - Pressing **Pause** while a chunk request is in flight stops future chunks; the returned committed Python snapshot is still hydrated first so browser and server timelines cannot diverge.
   - **Step Back** sends a negative signed step to the same session, clears stale terminal stars, and becomes disabled automatically when no retained checkpoint remains.
   - Local `file://` use keeps the legacy JavaScript VM as a standalone fallback/differential engine with its original local history behavior.
-  - `scratch/test_web_authority_controller.js` simulates the browser controller under Node and proves Compile → Step → Run → Step Back → Run uses one session while Python RAM/robot/IPC/grid state is reflected into the legacy visual model.
+  - `scratch/test_web_authority_controller.js` simulates the browser controller under Node and proves Compile → Step → chunked Run → Step Back → Run uses one session while Python RAM/robot/IPC/grid state is reflected into the legacy visual model.
 
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
   - Extracts the actual embedded JavaScript `lex` / `Grid` / `Robot` / `VM` implementation from `web_ui.html`, installs the same Web compiler/runtime layers used by the server, and executes it headlessly under Node.
@@ -127,11 +131,11 @@ Create a persistent debugger session with `POST /api/debug/sessions`, then use:
 GET    /api/debug/sessions/{session_id}
 POST   /api/debug/sessions/{session_id}/step   {"cycles": 1}   # forward
 POST   /api/debug/sessions/{session_id}/step   {"cycles": -1}  # rewind
-POST   /api/debug/sessions/{session_id}/run    {"max_cycles": 1000, "capture_trace": false}
+POST   /api/debug/sessions/{session_id}/run    {"max_cycles": 16, "breakpoint_lines": [5, 12], "breakpoint_robot_id": 0, "capture_trace": false}
 DELETE /api/debug/sessions/{session_id}
 ```
 
-A session keeps the same Python VM, grid, RAM, robot stacks/registers, IPC queue, cycle counter, and a bounded 256-checkpoint reverse history alive between requests.
+`run` executes at most `max_cycles` on the existing VM and can stop earlier before a selected robot reaches one of the requested source lines. Its `execution` object reports `stopped_by_breakpoint` plus `{robot_id, pc, line_num, cycle}` metadata when applicable. A session keeps the same Python VM, grid, RAM, robot stacks/registers, IPC queue, cycle counter, and a bounded 256-checkpoint reverse history alive between requests.
 
 ### Terminal UI & Compiler CLI
 
@@ -173,6 +177,7 @@ python scratch\test_level_schema.py
 python scratch\test_vm_runtime.py
 python scratch\test_runtime_api.py
 python scratch\test_debug_sessions.py
+python scratch\test_debug_breakpoints.py
 python scratch\test_cli_compiler.py
 node --check web_optimizer.js
 node --check web_preprocessor.js
