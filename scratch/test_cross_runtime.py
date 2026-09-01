@@ -22,8 +22,16 @@ DIFFERENTIAL_CASES = [
     ('dual-robot-ipc', 15, 150),
     ('portal-transport', 16, 100),
     ('shared-ram-sort', 17, 300),
+    ('data-matrix-map', 18, 100),
     ('button-door-portal-stack', 20, 200),
+    ('linked-list-data', 21, 100),
+    ('binary-search-data', 22, 250),
     ('four-robot-ipc', 24, 150),
+    ('pcb-data', 25, 150),
+    ('routing-data', 26, 150),
+    ('paging-data', 27, 150),
+    ('allocator-data', 31, 100),
+    ('self-modifying-data', 33, 100),
     ('dual-robot-finale', 35, 150),
 ]
 
