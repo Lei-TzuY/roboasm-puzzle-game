@@ -35,8 +35,8 @@ DIFFERENTIAL_CASES = [
     ('dual-robot-finale', 35, 150),
 ]
 
-# These micro-programs pin language semantics that differ naturally between
-# JavaScript and Python and therefore need explicit compatibility coverage.
+# These micro-programs pin language semantics and preprocessor behavior that
+# need explicit cross-language compatibility coverage.
 INLINE_CASES = [
     {
         'name': 'noop-alias',
@@ -75,6 +75,43 @@ INLINE_CASES = [
         'max_cycles': 10,
         'optimize': False,
     },
+    {
+        'name': 'define-equ-conditional-macro',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': (
+            '#define FEATURE_A 1\n'
+            'BONUS EQU 4\n'
+            '#ifdef FEATURE_A\n'
+            '  %macro APPLY_BONUS reg\n'
+            '    ADD BONUS reg\n'
+            '  %endmacro\n'
+            '  MOV 1 R0\n'
+            '  APPLY_BONUS R0\n'
+            '#else\n'
+            '  MOV 99 R0\n'
+            '#endif\n'
+            '#ifndef FEATURE_B\n'
+            '  INC R0\n'
+            '#endif\n'
+            'HLT\n'
+        ),
+        'max_cycles': 10,
+        'optimize': False,
+    },
+    {
+        'name': 'stdlib-include-macro',
+        'level_number': 1,
+        'level': 'level1.json',
+        'code': (
+            '#include "stdlib.asm"\n'
+            'MOV -7 R0\n'
+            'ABS_VAL R0\n'
+            'HLT\n'
+        ),
+        'max_cycles': 10,
+        'optimize': False,
+    },
 ]
 
 
@@ -103,8 +140,6 @@ def normalize_snapshot(snapshot):
             }
             for robot in snapshot['robots']
         ],
-        # JSON object keys are strings on the Node side, so normalize the Python
-        # integer-addressed RAM dictionary to the same representation.
         'ram': {
             str(key): value
             for key, value in sorted(
