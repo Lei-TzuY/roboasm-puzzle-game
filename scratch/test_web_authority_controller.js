@@ -163,7 +163,7 @@ async function fetchMock(url, options = {}) {
   }
   if (url === '/api/debug/sessions/session-123/run' && options.method === 'POST') {
     const body = JSON.parse(options.body || '{}');
-    assert.strictEqual(body.max_cycles, 32, 'speed 10 should request the maximum 32-cycle chunk');
+    assert.strictEqual(body.max_cycles, 16, 'speed 10 should request a conservative 16-cycle chunk');
     assert.deepStrictEqual(body.breakpoint_lines, [], 'empty breakpoint set must be forwarded explicitly');
     assert.strictEqual(body.breakpoint_robot_id, 0);
 
@@ -242,7 +242,7 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
   assert.strictEqual(controls.get('btn-back').disabled, true, 'cycle zero has no reverse checkpoint');
   assert.strictEqual(
     sandbox.ROBOASM_AUTHORITY_INTERNALS.debugRunChunkSize(),
-    32,
+    16,
     'controller should expose deterministic speed-to-chunk sizing'
   );
 
@@ -298,7 +298,7 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
     .filter(entry => entry.url.endsWith('/run'))
     .map(entry => JSON.parse(entry.options.body));
   assert.strictEqual(runBodies.length, 2, 'each Run phase should need one server chunk for this program');
-  assert.ok(runBodies.every(body => body.max_cycles === 32));
+  assert.ok(runBodies.every(body => body.max_cycles === 16));
 
   console.log('Web authoritative debugger controller integration: PASS');
 })().catch(error => {
