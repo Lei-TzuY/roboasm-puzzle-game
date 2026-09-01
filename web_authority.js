@@ -6,6 +6,13 @@
   const TRACE_ID = 'authority-trace';
   const TRACE_SLIDER_ID = 'authority-trace-slider';
   const TRACE_LABEL_ID = 'authority-trace-label';
+  const DEBUG_BASE = '/api/debug/sessions';
+
+  let debugSessionId = null;
+  let debugRunTimer = null;
+  let debugRunActive = false;
+  let debugRequestBusy = false;
+  let debugGeneration = 0;
 
   function esc(value) {
     return String(value)
@@ -24,7 +31,14 @@
     return JSON.stringify(value);
   }
 
+  function serverModeEnabled() {
+    return typeof window !== 'undefined'
+      && window.location
+      && window.location.protocol.startsWith('http');
+  }
+
   function setAuthorityStatus(html, tone = 'info') {
+    if (typeof document === 'undefined') return;
     const el = document.getElementById(STATUS_ID);
     if (!el) return;
     const colors = {
@@ -145,6 +159,7 @@
   }
 
   function renderTrace(trace) {
+    if (typeof document === 'undefined') return;
     const holder = document.getElementById(TRACE_ID);
     const slider = document.getElementById(TRACE_SLIDER_ID);
     const label = document.getElementById(TRACE_LABEL_ID);
@@ -166,11 +181,263 @@
 
     const show = () => {
       const idx = Number(slider.value);
-      label.textContent = `Trace cycle ${idx}/${trace.length - 1}`;
+      label.textContent = `Trace cycle ${trace[idx].cycles}`;
       holder.innerHTML = traceSnapshotHtml(trace[idx], idx, trace.length);
     };
     slider.oninput = show;
     show();
+  }
+
+  async function parseJsonResponse(response) {
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (_) {
+      throw new Error(`Server returned HTTP ${response.status} without JSON.`);
+    }
+    if (!response.ok || payload.status === 'error') {
+      const line = payload.line_num ? ` (line ${payload.line_num})` : '';
+      const error = new Error(`${payload.error || payload.message || `HTTP ${response.status}`}${line}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  }
+
+  async function requestJson(path, options = {}) {
+    return parseJsonResponse(await fetch(path, options));
+  }
+
+  async function deleteSession(sessionId, ignoreMissing = true) {
+    if (!sessionId) return;
+    try {
+      await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}`, {method: 'DELETE'});
+    } catch (error) {
+      if (!(ignoreMissing && error.status === 404)) throw error;
+    }
+  }
+
+  function coordEntriesToObject(entries, valueKey = 'value') {
+    const result = {};
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      result[`${entry.x},${entry.y}`] = Array.isArray(entry[valueKey])
+        ? [...entry[valueKey]] : entry[valueKey];
+    }
+    return result;
+  }
+
+  function hydrateBrowserFromPython(payload, replaceVm = false) {
+    if (!payload || !payload.state) throw new Error('Debugger response is missing VM state.');
+    const state = payload.state;
+    const levelDef = LEVELS[currentLevel];
+    if (!levelDef) throw new Error('Current level definition is unavailable.');
+
+    if (Array.isArray(payload.instructions)) instructions = payload.instructions.map(ins => ({...ins, args: [...(ins.args || [])]}));
+    if (replaceVm || !vm || !Array.isArray(vm.robots) || vm.robots.length !== (state.robots || []).length) {
+      vm = new VM(instructions, levelDef);
+    }
+
+    vm.instructions = instructions;
+    vm.cycles = state.cycles;
+    vm.halted = !!state.halted;
+    vm.sharedRam = {...(state.ram || {})};
+    vm.msgQueue = (state.messages || []).map(message => ({
+      sender: message.sender_id,
+      val: message.value,
+    }));
+    vm.faults = Array.isArray(state.faults) ? state.faults.map(fault => ({...fault})) : [];
+
+    (state.robots || []).forEach((source, index) => {
+      const robot = vm.robots[index];
+      if (!robot) return;
+      robot.x = source.x;
+      robot.y = source.y;
+      robot.facing = source.facing;
+      robot.inventory = source.inventory;
+      robot.registers = {...(source.registers || {})};
+      robot.flags = {...(source.flags || {})};
+      robot.stack = [...(source.stack || [])];
+      robot.callStack = [...(source.call_stack || [])];
+      robot.pc = source.pc;
+      robot.halted = !!source.halted;
+      robot.error = source.last_error ? source.last_error.message : null;
+      robot.ram = vm.sharedRam;
+    });
+
+    if (state.grid) {
+      vm.grid.items = coordEntriesToObject(state.grid.items, 'value');
+      vm.grid.inboxes = coordEntriesToObject(state.grid.inboxes, 'queue');
+      vm.grid.outboxes = coordEntriesToObject(state.grid.outboxes, 'queue');
+      vm.grid.openDoors = new Set((state.grid.open_doors || []).map(entry => `${entry.x},${entry.y}`));
+    }
+
+    selectedRobot = Math.min(selectedRobot || 0, Math.max(0, vm.robots.length - 1));
+    updateState();
+    drawGrid(1.0);
+    return vm;
+  }
+
+  function updateRunButtons(running) {
+    if (typeof document === 'undefined') return;
+    const runButton = document.getElementById('btn-run');
+    const stopButton = document.getElementById('btn-stop');
+    if (runButton) runButton.disabled = !!running;
+    if (stopButton) stopButton.disabled = !running;
+  }
+
+  function finishAuthoritativeState(payload) {
+    if (payload.won) {
+      stopAuthoritativeRun();
+      renderStars();
+      setMsg(`🎉 ${payload.message} (Cycles: ${payload.cycles}, Inst: ${payload.size})`, 'msg-ok');
+      setAuthorityStatus(`<strong>Python PASS</strong> · persistent session · cycle ${payload.cycles}`, 'ok');
+      return true;
+    }
+    if (payload.terminal) {
+      stopAuthoritativeRun();
+      const faults = payload.state && payload.state.faults ? payload.state.faults : [];
+      const detail = faults.length ? faults[faults.length - 1].message : payload.message;
+      setMsg(`Execution stopped: ${detail || 'program halted'}`, faults.length ? 'msg-err' : 'msg-info');
+      setAuthorityStatus(`<strong>Python session halted</strong> · cycle ${payload.cycles}`, faults.length ? 'err' : 'warn');
+      return true;
+    }
+    return false;
+  }
+
+  async function compileAuthoritative() {
+    stopAuthoritativeRun();
+    const generation = ++debugGeneration;
+    const previousSession = debugSessionId;
+    debugSessionId = null;
+    if (previousSession) deleteSession(previousSession, true).catch(() => {});
+
+    const def = LEVELS[currentLevel];
+    if (!def || !def.filename) {
+      setMsg('Current level has no server filename.', 'msg-err');
+      return;
+    }
+
+    const code = document.getElementById('code').value;
+    const optimizeInput = document.getElementById('chk-opt');
+    const optimize = !!(optimizeInput && optimizeInput.checked);
+    setMsg('Compiling with authoritative Python assembler…', 'msg-info');
+    setAuthorityStatus('Creating persistent Python debugger session…', 'info');
+
+    try {
+      const payload = await requestJson(DEBUG_BASE, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({level: def.filename, code, optimize}),
+      });
+      if (generation !== debugGeneration) {
+        deleteSession(payload.session_id, true).catch(() => {});
+        return;
+      }
+      debugSessionId = payload.session_id;
+      vmHistory = [];
+      selectedRobot = 0;
+      const stars = document.getElementById('stars-display');
+      if (stars) stars.innerHTML = '';
+      hydrateBrowserFromPython(payload, true);
+      setMsg(`Python compiled successfully (${payload.size} instructions${payload.optimized ? ' | Optimized' : ''}). Ready.`, 'msg-ok');
+      setAuthorityStatus(`<strong>Authoritative debugger ready</strong> · session ${esc(payload.session_id.slice(0, 8))}… · cycle 0`, 'ok');
+    } catch (error) {
+      if (generation !== debugGeneration) return;
+      vm = null;
+      instructions = [];
+      setMsg(`Assembly Error: ${error.message}`, 'msg-err');
+      setAuthorityStatus(`<strong>Debugger session failed:</strong> ${esc(error.message)}`, 'err');
+    }
+  }
+
+  async function ensureDebugSession() {
+    if (debugSessionId) return true;
+    await compileAuthoritative();
+    return !!debugSessionId;
+  }
+
+  async function stepAuthoritatively() {
+    if (debugRequestBusy || debugRunActive) return;
+    if (!(await ensureDebugSession())) return;
+    if (!vm || vm.halted) return;
+
+    debugRequestBusy = true;
+    const sessionId = debugSessionId;
+    try {
+      const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cycles: 1}),
+      });
+      if (sessionId !== debugSessionId) return;
+      hydrateBrowserFromPython(payload, false);
+      finishAuthoritativeState(payload);
+      if (!payload.terminal) setAuthorityStatus(`<strong>Python Step</strong> · persistent session · cycle ${payload.cycles}`, 'info');
+    } catch (error) {
+      if (error.status === 404 && sessionId === debugSessionId) debugSessionId = null;
+      setMsg(`Debugger step failed: ${error.message}`, 'msg-err');
+      setAuthorityStatus(`<strong>Python Step failed:</strong> ${esc(error.message)}`, 'err');
+    } finally {
+      debugRequestBusy = false;
+    }
+  }
+
+  function stopAuthoritativeRun() {
+    debugRunActive = false;
+    if (debugRunTimer) clearTimeout(debugRunTimer);
+    debugRunTimer = null;
+    updateRunButtons(false);
+  }
+
+  async function authoritativeRunTick() {
+    if (!debugRunActive || debugRequestBusy || !debugSessionId || !vm) return;
+    if (vm.halted) {
+      stopAuthoritativeRun();
+      return;
+    }
+
+    const robot = vm.robots[selectedRobot];
+    const currentRobotLine = robot ? instructions[robot.pc]?.line_num : null;
+    if (currentRobotLine && breakpoints.has(currentRobotLine) && vm.cycles > 0) {
+      stopAuthoritativeRun();
+      setMsg(`Breakpoint hit on line ${currentRobotLine}`, 'msg-err');
+      setAuthorityStatus(`<strong>Breakpoint</strong> · Python session paused at cycle ${vm.cycles}`, 'warn');
+      return;
+    }
+
+    debugRequestBusy = true;
+    const sessionId = debugSessionId;
+    try {
+      const payload = await requestJson(`${DEBUG_BASE}/${encodeURIComponent(sessionId)}/step`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cycles: 1}),
+      });
+      if (!debugRunActive || sessionId !== debugSessionId) return;
+      hydrateBrowserFromPython(payload, false);
+      if (finishAuthoritativeState(payload)) return;
+      const speed = Math.max(1, parseInt(document.getElementById('speed').value, 10) || 1);
+      const interval = Math.max(20, 500 / speed);
+      debugRunTimer = setTimeout(authoritativeRunTick, interval);
+    } catch (error) {
+      stopAuthoritativeRun();
+      if (error.status === 404 && sessionId === debugSessionId) debugSessionId = null;
+      setMsg(`Debugger run failed: ${error.message}`, 'msg-err');
+      setAuthorityStatus(`<strong>Python Run failed:</strong> ${esc(error.message)}`, 'err');
+    } finally {
+      debugRequestBusy = false;
+    }
+  }
+
+  async function runAuthoritatively() {
+    if (debugRunActive) return;
+    if (!(await ensureDebugSession())) return;
+    if (!vm || vm.halted) return;
+    debugRunActive = true;
+    updateRunButtons(true);
+    setAuthorityStatus(`<strong>Python Run</strong> · persistent session · cycle ${vm.cycles}`, 'info');
+    authoritativeRunTick();
   }
 
   async function callAuthoritativeRuntime(captureTrace) {
@@ -182,7 +449,7 @@
     const optimizeInput = document.getElementById('chk-opt');
     const optimize = !!(optimizeInput && optimizeInput.checked);
 
-    const response = await fetch('/api/run', {
+    return parseJsonResponse(await fetch('/api/run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -192,19 +459,7 @@
         capture_trace: !!captureTrace,
         optimize
       })
-    });
-
-    let payload;
-    try {
-      payload = await response.json();
-    } catch (_) {
-      throw new Error(`Server returned HTTP ${response.status} without JSON.`);
-    }
-    if (!response.ok || payload.status !== 'success') {
-      const line = payload.line_num ? ` (line ${payload.line_num})` : '';
-      throw new Error(`${payload.error || payload.message || `HTTP ${response.status}`}${line}`);
-    }
-    return payload;
+    }));
   }
 
   async function verifyAuthoritatively(captureTrace = false) {
@@ -275,9 +530,9 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <strong style="color:#58a6ff">Authoritative Python Runtime</strong>
         <label style="color:#8b949e">Max cycles <input id="authority-max-cycles" type="number" min="0" max="2000" value="1000" style="width:74px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"></label>
-        <span style="color:#6e7681">Server Verify mirrors the IDE Optimize checkbox. Trace is capped at 2000 cycles.</span>
+        <span style="color:#6e7681">HTTP IDE Compile / Step / Run use one persistent Python VM session. Server Verify remains an independent replay check.</span>
       </div>
-      <div id="${STATUS_ID}" style="color:#8b949e">Use Server Verify to validate against the Python runtime.</div>
+      <div id="${STATUS_ID}" style="color:#8b949e">Authoritative debugger controller installed.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
         <input id="${TRACE_SLIDER_ID}" type="range" min="0" max="0" value="0" disabled style="flex:1">
         <span id="${TRACE_LABEL_ID}" style="color:#8b949e;min-width:120px">No trace</span>
@@ -291,11 +546,38 @@
     else toolbar.insertAdjacentElement('afterend', panel);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installPanel, {once: true});
-  } else {
-    installPanel();
+  function installAuthoritativeControls() {
+    if (!serverModeEnabled()) return false;
+    if (typeof compileAndReset !== 'function' || typeof stepOnce !== 'function'
+        || typeof runAuto !== 'function' || typeof stopAuto !== 'function') {
+      throw new Error('Authoritative debugger controller could not find legacy IDE controls.');
+    }
+
+    globalThis.compileAndReset = compileAuthoritative;
+    globalThis.stepOnce = stepAuthoritatively;
+    globalThis.runAuto = runAuthoritatively;
+    globalThis.stopAuto = stopAuthoritativeRun;
+
+    const backButton = document.getElementById('btn-back');
+    if (backButton) {
+      backButton.disabled = true;
+      backButton.title = 'Step Back is disabled while the HTTP IDE uses the authoritative Python debugger session.';
+    }
+    return true;
   }
 
-  window.roboasmAuthoritativeVerify = verifyAuthoritatively;
+  globalThis.ROBOASM_AUTHORITY_INTERNALS = Object.freeze({
+    coordEntriesToObject,
+    serverTerminalProjection,
+    jsonStable,
+  });
+
+  if (typeof document !== 'undefined') {
+    installPanel();
+    installAuthoritativeControls();
+  }
+
+  if (typeof window !== 'undefined') {
+    window.roboasmAuthoritativeVerify = verifyAuthoritatively;
+  }
 })();

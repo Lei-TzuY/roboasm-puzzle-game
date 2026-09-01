@@ -67,6 +67,14 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Reuses the same compiler/level/VM preparation path as `/api/run`, so optimizer and include semantics stay authoritative.
   - Session tests exercise real localhost HTTP lifecycle persistence, terminal no-op behavior, TTL refresh/expiration, LRU eviction, compile diagnostics, and budget validation.
 
+- **Authoritative Web Debugger Controller (`web_authority.js`)**:
+  - On the canonical HTTP IDE path, the existing **Compile**, **Step**, **Run**, and **Pause** controls are rebound to persistent Python debugger sessions instead of executing the duplicated browser VM.
+  - Python snapshots hydrate the existing grid, register/flag, stack, RAM, IPC, outbox, door, PC, cycle, and instruction inspectors after every authoritative step.
+  - **Run** advances the same Python session one cycle at a time, preserving the existing speed control, line breakpoints, and immediate Pause behavior without replaying from cycle zero.
+  - Local `file://` use keeps the legacy JavaScript VM as a standalone fallback/differential engine.
+  - **Step Back** is intentionally disabled in authoritative HTTP mode until server-side reverse execution exists, preventing local/browser state from diverging from the canonical Python session.
+  - `scratch/test_web_authority_controller.js` simulates the browser controller under Node and proves Compile → Step → Run uses one session while Python RAM/robot/IPC/grid state is reflected into the legacy visual model.
+
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
   - Extracts the actual embedded JavaScript `lex` / `Grid` / `Robot` / `VM` implementation from `web_ui.html`, installs the same Web compiler/runtime layers used by the server, and executes it headlessly under Node.
   - Compares JavaScript and authoritative Python snapshots **cycle by cycle**, including robot state, flags, stacks, RAM, IPC, items, inboxes, outboxes, doors, cycles, and halt state.
@@ -86,8 +94,8 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 
 - **Interactive Web IDE & Audio-Visual Studio**:
   - Web Audio API 8-Bit Retro Sound Synthesizer (`🔊 Sound: ON / OFF`).
-  - Line Breakpoints (`●`), Time-Travel Step Back (`⏪ Step Back`), Code Auto-Formatter (`🧹 Format`).
-  - **Server Verify** runs the editor source through the authoritative Python assembler + VM and reports PASS/faults independently of the browser VM.
+  - Line Breakpoints (`●`), Time-Travel Step Back (`⏪ Step Back` in standalone mode), Code Auto-Formatter (`🧹 Format`).
+  - **Server Verify** runs the editor source through the authoritative Python assembler + VM and reports PASS/faults independently of the persistent debugger session.
   - Server Verify mirrors the IDE **Optimize** checkbox so bytecode size/cycle comparisons are made in the same compile mode.
   - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
   - **Python Trace** captures bounded cycle-by-cycle snapshots with a scrubber for robots, registers, RAM, outboxes, and IPC state.
@@ -106,7 +114,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 python web_server.py
 ```
 
-Then open `http://127.0.0.1:8000` in your web browser. The server-served path injects the project include map, browser optimizer/preprocessor, VM compatibility layer, and authoritative-runtime bridge before initializing the IDE. Opening `web_ui.html` directly still works as the legacy standalone browser IDE, but the HTTP path is the canonical verified configuration.
+Then open `http://127.0.0.1:8000` in your web browser. On this canonical HTTP path, Compile/Step/Run/Pause operate on a persistent authoritative Python VM and the returned snapshots drive the existing visual debugger. Opening `web_ui.html` directly still works as the legacy standalone JavaScript IDE and remains useful as a fallback/differential runtime.
 
 ### Debug Session API
 
@@ -138,9 +146,10 @@ python scratch\validate_levels.py
 python scratch\test_all_solutions.py
 ```
 
-Run cross-runtime and optimizer verification:
+Run cross-runtime, Web-controller, and optimizer verification:
 
 ```powershell
+node scratch\test_web_authority_controller.js
 python scratch\test_cross_runtime.py
 python scratch\test_optimizer_control_flow.py
 python scratch\test_optimizer_parity.py
@@ -166,4 +175,5 @@ node --check web_preprocessor.js
 node --check web_runtime_compat.js
 node --check web_authority.js
 node --check scratch\js_runtime_runner.js
+node --check scratch\test_web_authority_controller.js
 ```

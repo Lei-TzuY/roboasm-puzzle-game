@@ -23,6 +23,9 @@ jobs:
           node --check web_runtime_compat.js
           node --check web_authority.js
           node --check scratch/js_runtime_runner.js
+          node --check scratch/test_web_authority_controller.js
+      - name: Validate authoritative Web controls
+        run: node scratch/test_web_authority_controller.js
       - name: Validate level definitions
         run: python scratch/validate_levels.py
       - name: Validate all level solutions
