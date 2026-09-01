@@ -65,6 +65,17 @@ A plain line breakpoint and a conditional breakpoint are **pre-instruction stops
 
 A register or RAM watchpoint is a **post-cycle mutation stop**. The cycle that changed the watched value has completed, and the response includes the old/new values. Because every executed cycle still creates a reverse checkpoint, one Step Back returns to the state immediately before the mutation.
 
+## Web IDE advanced stops
+
+On the canonical HTTP IDE, expand **Advanced Stops · conditional breakpoint / watchpoints** in the authoritative runtime panel. The controls are live; the next Run chunk reads them and forwards a structured stop specification to Python.
+
+- **Conditional**: enable it, enter a source line, and enter a safe expression such as `R0 == 3 and RAM[0] != 7`. The currently selected robot is used unless an API client supplies another robot ID.
+- **Register**: select `R0`–`R3`. Run pauses immediately after that register changes on the selected robot.
+- **RAM**: enter an integer shared-memory address. Run pauses immediately after that address is created, removed, or changes value.
+- Ordinary red-dot source breakpoints remain active at the same time and are included in the same server stop specification.
+
+When a conditional breakpoint hits, the IDE reports the condition and source line. Watchpoint messages report the old and new values. All stop decisions are made by the authoritative Python session; the browser does not evaluate conditions locally. Disabling every advanced control preserves the legacy `breakpoint_lines: [...]` request shape exactly.
+
 ## Conditional breakpoint language
 
 Conditions are parsed with Python's AST but are evaluated by a dedicated interpreter in `debug_expressions.py`; Python `eval()` is never used.
@@ -139,5 +150,6 @@ CI covers:
 - register and RAM watchpoints stopping after mutation;
 - exact Step Back restoration to the pre-mutation checkpoint;
 - real localhost HTTP structured stop specifications;
+- Web advanced-stop editor serialization, conditional-hit decoration, watchpoint pause behavior, and legacy array fallback;
 - compatibility with legacy `breakpoint_lines: [..]` requests;
 - all existing level, runtime, optimizer, fuzz, Web-controller, and reverse-debugger gates.
