@@ -1,19 +1,17 @@
 (() => {
   'use strict';
 
-  // Compatibility fixes for the legacy browser VM. Python remains the
-  // authoritative runtime; this shim keeps the interactive VM aligned while
-  // the embedded runtime is incrementally retired/refactored.
+  // Runtime compatibility fixes for the legacy browser VM. Python remains the
+  // authoritative runtime; compiler/preprocessor parity lives separately in
+  // web_preprocessor.js so the two concerns can evolve independently.
   if (typeof Robot === 'undefined' || !Robot.prototype || !Robot.prototype.step
-      || typeof assemble !== 'function' || typeof VM === 'undefined') {
+      || typeof VM === 'undefined') {
     throw new Error('RoboASM Web runtime compatibility shim could not find the embedded runtime');
   }
   if (Robot.prototype.step.__roboasmCompatWrapped) return;
 
   const originalStep = Robot.prototype.step;
-  const originalAssemble = assemble;
   const OriginalVM = VM;
-  const DATA_DIRECTIVES = new Set(['db', '.db', 'dw', '.dw', 'array', '.array']);
   const DATA_MEMORY_KEY = '__roboasmDataMemory';
 
   function opcodeOf(instruction) {
@@ -28,46 +26,6 @@
     robot.halted = true;
     robot.error = message;
     throw new Error(message);
-  }
-
-  function parseDataValue(raw) {
-    const text = String(raw);
-    if (/^[+-]?\d+$/.test(text)) {
-      const value = Number(text);
-      if (!Number.isSafeInteger(value)) {
-        throw new Error(`Data value '${text}' exceeds the Web VM safe-integer range`);
-      }
-      return value;
-    }
-    return raw;
-  }
-
-  function compatibleAssemble(tokens, optimize = false) {
-    const filtered = [];
-    const dataMemory = {};
-    let address = 0;
-
-    for (const token of tokens) {
-      const parts = token && Array.isArray(token.parts) ? token.parts : [];
-      const first = parts.length ? String(parts[0]).toLowerCase() : '';
-      if (DATA_DIRECTIVES.has(first)) {
-        for (const raw of parts.slice(1)) {
-          dataMemory[address] = parseDataValue(raw);
-          address += 1;
-        }
-        continue;
-      }
-      filtered.push(token);
-    }
-
-    const instructions = originalAssemble(filtered, optimize);
-    Object.defineProperty(instructions, DATA_MEMORY_KEY, {
-      value: dataMemory,
-      enumerable: false,
-      configurable: false,
-      writable: false,
-    });
-    return instructions;
   }
 
   class CompatibleVM extends OriginalVM {
@@ -184,13 +142,11 @@
   compatibleStep.__roboasmCompatWrapped = true;
   compatibleStep.__roboasmOriginalStep = originalStep;
   Robot.prototype.step = compatibleStep;
-  assemble = compatibleAssemble;
   VM = CompatibleVM;
 
   globalThis.ROBOASM_WEB_RUNTIME_COMPAT = Object.freeze({
-    version: 2,
+    version: 3,
     fixes: [
-      'data-directives',
       'initial-data-memory',
       'empty-inbox-pick',
       'noop-alias',
