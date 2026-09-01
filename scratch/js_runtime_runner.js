@@ -7,6 +7,7 @@ const nodeVm = require('vm');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const WEB_UI_PATH = path.join(ROOT_DIR, 'web_ui.html');
+const WEB_OPTIMIZER_PATH = path.join(ROOT_DIR, 'web_optimizer.js');
 const WEB_PREPROCESSOR_PATH = path.join(ROOT_DIR, 'web_preprocessor.js');
 const WEB_COMPAT_PATH = path.join(ROOT_DIR, 'web_runtime_compat.js');
 const RUNTIME_START = 'function lex(src)';
@@ -14,21 +15,16 @@ const RUNTIME_END = '// State & History Stack for Breakpoints & Step Back';
 
 function collectIncludeSources(rootDir) {
   const result = {};
-
   function walk(dir) {
     for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
       if (entry.name === '.git' || entry.name === '__pycache__' || entry.name === '.pytest_cache') continue;
       const absolute = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(absolute);
-        continue;
-      }
+      if (entry.isDirectory()) { walk(absolute); continue; }
       if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.asm') continue;
       const relative = path.relative(rootDir, absolute).split(path.sep).join('/');
       result[relative] = fs.readFileSync(absolute, 'utf8');
     }
   }
-
   walk(rootDir);
   return result;
 }
@@ -37,11 +33,8 @@ function loadEmbeddedRuntime() {
   const html = fs.readFileSync(WEB_UI_PATH, 'utf8');
   const start = html.indexOf(RUNTIME_START);
   const end = html.indexOf(RUNTIME_END, start);
-  if (start < 0 || end < 0 || end <= start) {
-    throw new Error('Could not locate embedded Web IDE runtime in web_ui.html');
-  }
+  if (start < 0 || end < 0 || end <= start) throw new Error('Could not locate embedded Web IDE runtime in web_ui.html');
 
-  const runtimeSource = html.slice(start, end);
   const sandbox = {
     console,
     playAudioSynth: () => {},
@@ -49,17 +42,12 @@ function loadEmbeddedRuntime() {
   };
   sandbox.globalThis = sandbox;
   nodeVm.createContext(sandbox);
-  nodeVm.runInContext(runtimeSource, sandbox, {filename: 'web_ui.runtime.js'});
+  nodeVm.runInContext(html.slice(start, end), sandbox, {filename: 'web_ui.runtime.js'});
 
-  // Match the canonical server-served browser composition: compiler parity is
-  // installed first, then VM semantic compatibility.
-  const preprocessorSource = fs.readFileSync(WEB_PREPROCESSOR_PATH, 'utf8');
-  nodeVm.runInContext(preprocessorSource, sandbox, {filename: 'web_preprocessor.js'});
+  nodeVm.runInContext(fs.readFileSync(WEB_OPTIMIZER_PATH, 'utf8'), sandbox, {filename: 'web_optimizer.js'});
+  nodeVm.runInContext(fs.readFileSync(WEB_PREPROCESSOR_PATH, 'utf8'), sandbox, {filename: 'web_preprocessor.js'});
+  nodeVm.runInContext(fs.readFileSync(WEB_COMPAT_PATH, 'utf8'), sandbox, {filename: 'web_runtime_compat.js'});
 
-  const compatSource = fs.readFileSync(WEB_COMPAT_PATH, 'utf8');
-  nodeVm.runInContext(compatSource, sandbox, {filename: 'web_runtime_compat.js'});
-
-  // Capture bindings only after both layers have rebound assembler/VM.
   nodeVm.runInContext(
     'globalThis.__roboasmRuntime = { lex, assemble, Grid, Robot, VM };',
     sandbox,
@@ -73,15 +61,15 @@ function parseCoord(key) {
   return {x, y};
 }
 
+function cloneJson(value) {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
 function coordEntries(mapping, valueKey) {
   return Object.entries(mapping || {})
     .map(([key, value]) => ({...parseCoord(key), [valueKey]: cloneJson(value)}))
     .sort((a, b) => a.x - b.x || a.y - b.y);
-}
-
-function cloneJson(value) {
-  if (value === undefined) return null;
-  return JSON.parse(JSON.stringify(value));
 }
 
 function sortObject(mapping) {
@@ -92,37 +80,30 @@ function sortObject(mapping) {
   return result;
 }
 
+function bytecodeProjection(instructions) {
+  return instructions.map(inst => ({opcode: inst.opcode, args: cloneJson(inst.args || [])}));
+}
+
 function snapshot(machine) {
   return {
     cycles: machine.cycles,
     halted: !!machine.halted,
     robots: machine.robots.map(robot => ({
-      id: robot.id,
-      x: robot.x,
-      y: robot.y,
-      facing: robot.facing,
+      id: robot.id, x: robot.x, y: robot.y, facing: robot.facing,
       inventory: robot.inventory === undefined ? null : robot.inventory,
-      registers: sortObject(robot.registers),
-      flags: cloneJson(robot.flags || {}),
-      stack: cloneJson(robot.stack || []),
-      pc: robot.pc,
-      call_stack: cloneJson(robot.callStack || []),
-      halted: !!robot.halted,
+      registers: sortObject(robot.registers), flags: cloneJson(robot.flags || {}),
+      stack: cloneJson(robot.stack || []), pc: robot.pc,
+      call_stack: cloneJson(robot.callStack || []), halted: !!robot.halted,
     })),
     ram: sortObject(machine.sharedRam || {}),
-    messages: (machine.msgQueue || []).map(message => ({
-      sender_id: message.sender,
-      value: cloneJson(message.val),
-    })),
+    messages: (machine.msgQueue || []).map(message => ({sender_id: message.sender, value: cloneJson(message.val)})),
     grid: {
       width: machine.grid.width,
       height: machine.grid.height,
       items: coordEntries(machine.grid.items, 'value'),
       inboxes: coordEntries(machine.grid.inboxes, 'queue'),
       outboxes: coordEntries(machine.grid.outboxes, 'queue'),
-      open_doors: Array.from(machine.grid.openDoors || [])
-        .map(parseCoord)
-        .sort((a, b) => a.x - b.x || a.y - b.y),
+      open_doors: Array.from(machine.grid.openDoors || []).map(parseCoord).sort((a, b) => a.x - b.x || a.y - b.y),
     },
   };
 }
@@ -153,34 +134,26 @@ function runCase(runtime, testCase) {
       message: winResult[1],
       cycles: machine.cycles,
       size: instructions.length,
+      bytecode: bytecodeProjection(instructions),
+      labels: cloneJson(instructions.__roboasmLabels || {}),
       limit_reached: !machine.halted && !winResult[0] && machine.cycles >= maxCycles,
       state: snapshot(machine),
       trace,
     };
   } catch (error) {
-    return {
-      name: testCase.name,
-      status: 'error',
-      error: error && error.stack ? error.stack : String(error),
-    };
+    return {name: testCase.name, status: 'error', error: error && error.stack ? error.stack : String(error)};
   }
 }
 
 function main() {
-  const raw = fs.readFileSync(0, 'utf8');
-  const request = JSON.parse(raw || '{}');
-  if (!Array.isArray(request.cases)) {
-    throw new Error("Input JSON must contain a 'cases' array");
-  }
-
+  const request = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+  if (!Array.isArray(request.cases)) throw new Error("Input JSON must contain a 'cases' array");
   const runtime = loadEmbeddedRuntime();
-  const results = request.cases.map(testCase => runCase(runtime, testCase));
-  process.stdout.write(JSON.stringify({results}));
+  process.stdout.write(JSON.stringify({results: request.cases.map(testCase => runCase(runtime, testCase))}));
 }
 
-try {
-  main();
-} catch (error) {
+try { main(); }
+catch (error) {
   process.stderr.write(`${error && error.stack ? error.stack : error}\n`);
   process.exitCode = 1;
 }
