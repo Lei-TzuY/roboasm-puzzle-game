@@ -209,16 +209,6 @@
     return filtered;
   }
 
-  function resolveArgument(raw, constants, labels) {
-    if (own(constants, raw)) return constants[raw];
-    if (own(labels, raw)) return labels[raw];
-    return parseScalar(raw, 'Integer operand') instanceof Number
-      ? parseScalar(raw, 'Integer operand')
-      : (/^[+-]?\d+$/.test(String(raw))
-          ? parseScalar(raw, 'Integer operand')
-          : String(raw).toUpperCase());
-  }
-
   function assembleProcessed(tokens, constants, optimize) {
     const labels = {};
     const filtered = [];
