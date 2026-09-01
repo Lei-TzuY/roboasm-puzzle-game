@@ -449,7 +449,7 @@
     const optimizeInput = document.getElementById('chk-opt');
     const optimize = !!(optimizeInput && optimizeInput.checked);
 
-    return requestJson('/api/run', {
+    return parseJsonResponse(await fetch('/api/run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -459,7 +459,7 @@
         capture_trace: !!captureTrace,
         optimize
       })
-    });
+    }));
   }
 
   async function verifyAuthoritatively(captureTrace = false) {
