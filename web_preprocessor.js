@@ -9,9 +9,6 @@
   }
   if (assemble.__roboasmPreprocessorWrapped) return;
 
-  const originalFoldConstants = typeof foldConstants === 'function'
-    ? foldConstants
-    : null;
   const DATA_MEMORY_KEY = '__roboasmDataMemory';
   const INCLUDE_DIRECTIVES = new Set(['#include', '@include', 'include']);
   const DEFINE_DIRECTIVES = new Set(['#define', '@define']);
@@ -95,9 +92,7 @@
       const first = String(parts[0]).toLowerCase();
 
       if (DEFINE_DIRECTIVES.has(first)) {
-        if (parts.length >= 3) {
-          constants[parts[1]] = parseScalar(parts[2], 'Constant');
-        }
+        if (parts.length >= 3) constants[parts[1]] = parseScalar(parts[2], 'Constant');
         continue;
       }
 
@@ -153,9 +148,7 @@
       if (stack[stack.length - 1]) result.push(cloneToken(token));
     }
 
-    if (stack.length > 1) {
-      throw new Error('Unterminated #ifdef/#ifndef directive block');
-    }
+    if (stack.length > 1) throw new Error('Unterminated #ifdef/#ifndef directive block');
     return result;
   }
 
@@ -174,14 +167,12 @@
         inMacro = {name: parts[1], args: parts.slice(2), body: []};
         continue;
       }
-
       if (MACRO_END.has(first)) {
         if (!inMacro) throw new Error('Unexpected %endmacro directive');
         macroDefs[inMacro.name] = inMacro;
         inMacro = null;
         continue;
       }
-
       if (inMacro) {
         inMacro.body.push(cloneToken(token));
         continue;
@@ -244,9 +235,22 @@
       return {opcode, args, line_num: token.line_num};
     });
 
-    if (optimize && originalFoldConstants) {
-      instructions = originalFoldConstants(instructions);
+    let optimizedLabels = labels;
+    if (optimize) {
+      if (typeof globalThis.optimizeRoboASM !== 'function') {
+        throw new Error('Web optimizer layer is not loaded');
+      }
+      const result = globalThis.optimizeRoboASM(instructions, labels);
+      instructions = result.instructions;
+      optimizedLabels = result.labels;
     }
+
+    Object.defineProperty(instructions, '__roboasmLabels', {
+      value: optimizedLabels,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
     return instructions;
   }
 
@@ -255,11 +259,7 @@
     const processed = processConstantsAndData(expanded);
     const conditional = processConditionals(processed.tokens, processed.constants);
     const macroExpanded = expandMacros(conditional);
-    const instructions = assembleProcessed(
-      macroExpanded,
-      processed.constants,
-      optimize,
-    );
+    const instructions = assembleProcessed(macroExpanded, processed.constants, optimize);
 
     Object.defineProperty(instructions, DATA_MEMORY_KEY, {
       value: processed.dataMemory,
@@ -274,16 +274,10 @@
   assemble = compatibleAssemble;
 
   globalThis.ROBOASM_WEB_PREPROCESSOR = Object.freeze({
-    version: 1,
+    version: 2,
     features: [
-      'project-includes',
-      'define',
-      'equ',
-      'conditional-compilation',
-      'macros',
-      'data-directives',
-      'labels',
-      'constant-resolution',
+      'project-includes', 'define', 'equ', 'conditional-compilation', 'macros',
+      'data-directives', 'labels', 'constant-resolution', 'optimizer-parity',
     ],
   });
 })();
