@@ -13,7 +13,7 @@ function response(status, payload) {
   };
 }
 
-function snapshot(cycles, {won = false, halted = false} = {}) {
+function snapshot(cycles, {won = false, halted = false, historyDepth = cycles} = {}) {
   return {
     status: 'success',
     session_id: 'session-123',
@@ -23,6 +23,8 @@ function snapshot(cycles, {won = false, halted = false} = {}) {
     cycles,
     size: 2,
     optimized: false,
+    history_depth: historyDepth,
+    history_limit: 256,
     instructions: [
       {opcode: 'MOV', args: [cycles + 1, 'R0'], line_num: 1},
       {opcode: 'HLT', args: [], line_num: 2},
@@ -115,15 +117,41 @@ class FakeVM {
 }
 
 const requests = [];
-let stepCount = 0;
+let serverCycle = 0;
+const serverHistory = [];
 async function fetchMock(url, options = {}) {
   requests.push({url, options});
   if (url === '/api/debug/sessions' && options.method === 'POST') {
-    return response(201, snapshot(0));
+    serverCycle = 0;
+    serverHistory.length = 0;
+    return response(201, snapshot(0, {historyDepth: 0}));
   }
   if (url === '/api/debug/sessions/session-123/step' && options.method === 'POST') {
-    stepCount += 1;
-    return response(200, snapshot(stepCount, {won: stepCount >= 2, halted: stepCount >= 2}));
+    const body = JSON.parse(options.body || '{}');
+    if (body.cycles === 1) {
+      serverHistory.push(serverCycle);
+      serverCycle += 1;
+      return response(200, snapshot(serverCycle, {
+        won: serverCycle >= 2,
+        halted: serverCycle >= 2,
+        historyDepth: serverHistory.length,
+      }));
+    }
+    if (body.cycles === -1) {
+      const target = serverHistory.length ? serverHistory.pop() : serverCycle;
+      const rewound = target === serverCycle ? 0 : 1;
+      serverCycle = target;
+      return response(200, {
+        ...snapshot(serverCycle, {historyDepth: serverHistory.length}),
+        rewind: {
+          requested_cycles: 1,
+          cycles_rewound: rewound,
+          history_depth: serverHistory.length,
+          history_limit: 256,
+          at_history_start: serverHistory.length === 0,
+        },
+      });
+    }
   }
   if (url === '/api/debug/sessions/session-123' && options.method === 'DELETE') {
     return response(200, {status: 'success', deleted: true});
@@ -158,10 +186,14 @@ const sandbox = {
   breakpoints: new Set(),
   updateState() {},
   drawGrid() {},
-  renderStars() { sandbox.renderedStars = true; },
+  renderStars() {
+    sandbox.renderedStars = true;
+    controls.get('stars-display').innerHTML = '***';
+  },
   setMsg(text, cls) { messages.push({text, cls}); },
   compileAndReset() { throw new Error('legacy compile should be replaced'); },
   stepOnce() { throw new Error('legacy step should be replaced'); },
+  stepBack() { throw new Error('legacy Step Back should be replaced'); },
   runAuto() { throw new Error('legacy run should be replaced'); },
   stopAuto() { throw new Error('legacy stop should be replaced'); },
 };
@@ -172,12 +204,13 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'web_authority.js'), '
 vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
 
 (async () => {
-  assert.strictEqual(controls.get('btn-back').disabled, true, 'server mode must disable local Step Back');
+  assert.strictEqual(controls.get('btn-back').disabled, true, 'cycle zero has no reverse checkpoint');
 
   await sandbox.compileAndReset();
   assert.strictEqual(requests[0].url, '/api/debug/sessions');
   assert.strictEqual(sandbox.vm.cycles, 0);
   assert.strictEqual(sandbox.vm.sharedRam['0'], 0);
+  assert.strictEqual(controls.get('btn-back').disabled, true);
   assert.deepStrictEqual(Array.from(sandbox.vm.grid.inboxes['0,0']), [1, 2]);
 
   await sandbox.stepOnce();
@@ -186,6 +219,7 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
   assert.strictEqual(sandbox.vm.robots[0].x, 1);
   assert.strictEqual(sandbox.vm.sharedRam['0'], 1);
   assert.ok(sandbox.vm.grid.openDoors.has('1,0'));
+  assert.strictEqual(controls.get('btn-back').disabled, false, 'forward Step must create a server checkpoint');
   assert.deepStrictEqual(
     JSON.parse(JSON.stringify(sandbox.vm.msgQueue)),
     [{sender: 1, val: 9}],
@@ -199,11 +233,27 @@ vmModule.runInContext(source, sandbox, {filename: 'web_authority.js'});
   assert.strictEqual(sandbox.renderedStars, true);
   assert.strictEqual(controls.get('btn-run').disabled, false);
   assert.strictEqual(controls.get('btn-stop').disabled, true);
+  assert.strictEqual(controls.get('btn-back').disabled, false, 'terminal state must remain rewindable');
   assert.ok(messages.some(entry => entry.text.includes('Level Complete')));
 
+  await sandbox.stepBack();
+  assert.strictEqual(sandbox.vm.cycles, 1, 'Step Back must rewind the same Python session');
+  assert.strictEqual(sandbox.vm.halted, false, 'rewinding terminal state must make it runnable again');
+  assert.strictEqual(sandbox.vm.robots[0].registers.R0, 1);
+  assert.strictEqual(controls.get('stars-display').innerHTML, '', 'rewinding a win clears terminal stars');
+  assert.strictEqual(controls.get('btn-back').disabled, false, 'cycle one still retains cycle-zero checkpoint');
+
+  sandbox.runAuto();
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.strictEqual(sandbox.vm.cycles, 2, 'Run after rewind must branch forward from restored state');
+  assert.strictEqual(sandbox.vm.halted, true);
+
   const createCount = requests.filter(entry => entry.url === '/api/debug/sessions').length;
-  assert.strictEqual(createCount, 1, 'Step and Run must not replay source from cycle zero');
-  assert.strictEqual(stepCount, 2, 'one manual Step plus one Run tick should reach terminal state');
+  assert.strictEqual(createCount, 1, 'Step, Run, and Step Back must stay on one authoritative session');
+  const stepBodies = requests
+    .filter(entry => entry.url.endsWith('/step'))
+    .map(entry => JSON.parse(entry.options.body).cycles);
+  assert.deepStrictEqual(stepBodies, [1, 1, -1, 1], 'timeline should execute forward, rewind, then branch forward');
 
   console.log('Web authoritative debugger controller integration: PASS');
 })().catch(error => {
