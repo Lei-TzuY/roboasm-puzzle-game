@@ -26,6 +26,7 @@ class TestHeadlessRuntime(unittest.TestCase):
 
         self.assertEqual(result['status'], 'success')
         self.assertTrue(result['won'])
+        self.assertFalse(result['optimized'])
         self.assertGreater(result['cycles'], 0)
         self.assertEqual(result['cycles'], result['execution']['total_cycles'])
         self.assertEqual(result['state']['cycles'], result['cycles'])
@@ -44,7 +45,32 @@ class TestHeadlessRuntime(unittest.TestCase):
         self.assertGreaterEqual(len(result['execution']['trace']), 1)
         self.assertEqual(result['execution']['trace'][0]['cycles'], 0)
 
-    def test_execution_limits_are_enforced(self):
+    def test_optimizer_option_changes_headless_bytecode(self):
+        level_path = os.path.join(ROOT_DIR, 'levels', 'level1.json')
+        code = 'MOV 5 R0\nADD 3 R0\nHLT'
+
+        plain = execute_level_code(code, level_path, max_cycles=10, optimize=False)
+        optimized = execute_level_code(code, level_path, max_cycles=10, optimize=True)
+
+        self.assertFalse(plain['optimized'])
+        self.assertTrue(optimized['optimized'])
+        self.assertLess(optimized['size'], plain['size'])
+        self.assertEqual(optimized['state']['robots'][0]['registers']['R0'], 8)
+
+    def test_source_base_dir_controls_include_resolution(self):
+        level_path = os.path.join(ROOT_DIR, 'levels', 'level1.json')
+        code = '#include "stdlib.asm"\nMOV -5 R0\nABS_VAL R0\nHLT'
+
+        result = execute_level_code(
+            code,
+            level_path,
+            max_cycles=10,
+            source_base_dir=ROOT_DIR,
+        )
+
+        self.assertEqual(result['state']['robots'][0]['registers']['R0'], 5)
+
+    def test_execution_limits_and_compile_options_are_enforced(self):
         level_path = os.path.join(ROOT_DIR, 'levels', 'level1.json')
         with self.assertRaises(ValueError):
             execute_level_code('HLT', level_path, max_cycles=MAX_RUN_CYCLES + 1)
@@ -55,6 +81,10 @@ class TestHeadlessRuntime(unittest.TestCase):
                 max_cycles=MAX_TRACE_CYCLES + 1,
                 capture_trace=True,
             )
+        with self.assertRaises(ValueError):
+            execute_level_code('HLT', level_path, optimize='yes')
+        with self.assertRaises(ValueError):
+            execute_level_code('HLT', level_path, source_base_dir=123)
 
     def test_level_resolver_is_confined_to_bundled_json_levels(self):
         resolved = resolve_level_path('../level1.json')
@@ -121,6 +151,25 @@ class TestRunHTTPAPI(unittest.TestCase):
         self.assertIn("fetch('/api/run'", source)
         self.assertIn('Runtime drift detected', source)
         self.assertIn('capture_trace', source)
+        self.assertIn("getElementById('chk-opt')", source)
+        self.assertIn('optimize', source)
+
+    def test_assemble_endpoint_honors_optimizer_option(self):
+        code = 'MOV 5 R0\nADD 3 R0\nHLT'
+        plain_status, plain = self.post_json('/api/assemble', {
+            'code': code,
+            'optimize': False,
+        })
+        opt_status, optimized = self.post_json('/api/assemble', {
+            'code': code,
+            'optimize': True,
+        })
+
+        self.assertEqual(plain_status, 200)
+        self.assertEqual(opt_status, 200)
+        self.assertFalse(plain['optimized'])
+        self.assertTrue(optimized['optimized'])
+        self.assertLess(len(optimized['instructions']), len(plain['instructions']))
 
     def test_run_endpoint_executes_bundled_solution(self):
         solution_path = os.path.join(ROOT_DIR, 'solutions', 'level1.asm')
@@ -136,7 +185,21 @@ class TestRunHTTPAPI(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload['won'])
         self.assertEqual(payload['status'], 'success')
+        self.assertFalse(payload['optimized'])
         self.assertIn('state', payload)
+
+    def test_run_endpoint_honors_optimizer_and_project_include_root(self):
+        code = '#include "stdlib.asm"\nMOV -5 R0\nABS_VAL R0\nADD 0 R0\nHLT'
+        status, payload = self.post_json('/api/run', {
+            'level': 'level1.json',
+            'code': code,
+            'max_cycles': 20,
+            'optimize': True,
+        })
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload['optimized'])
+        self.assertEqual(payload['state']['robots'][0]['registers']['R0'], 5)
 
     def test_run_endpoint_returns_trace_for_debugger_bridge(self):
         status, payload = self.post_json('/api/run', {
@@ -163,6 +226,17 @@ class TestRunHTTPAPI(unittest.TestCase):
         self.assertEqual(payload['status'], 'error')
         self.assertEqual(payload['line_num'], 1)
         self.assertIn('must be writable', payload['error'])
+
+    def test_run_endpoint_rejects_invalid_optimizer_type(self):
+        status, payload = self.post_json('/api/run', {
+            'level': 'level1.json',
+            'code': 'HLT',
+            'optimize': 'true',
+        })
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload['status'], 'error')
+        self.assertIn('optimize must be a boolean', payload['error'])
 
     def test_run_endpoint_rejects_unbounded_request(self):
         status, payload = self.post_json('/api/run', {
