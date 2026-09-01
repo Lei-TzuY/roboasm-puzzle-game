@@ -5,12 +5,7 @@ import secrets
 import threading
 import time
 
-from runtime_api import (
-    MAX_RUN_CYCLES,
-    MAX_TRACE_CYCLES,
-    prepare_level_execution,
-    validate_run_options,
-)
+from runtime_api import prepare_level_execution, validate_run_options
 
 MAX_DEBUG_SESSIONS = 32
 DEBUG_SESSION_TTL_SECONDS = 30 * 60
@@ -110,14 +105,8 @@ class DebugSession:
         return self.advance(max_cycles=cycles, capture_trace=False)
 
     def run(self, max_cycles=1_000, capture_trace=False):
-        if max_cycles > MAX_RUN_CYCLES:
-            raise ValueError(
-                f"max_cycles must be between 0 and {MAX_RUN_CYCLES}"
-            )
-        if capture_trace and max_cycles > MAX_TRACE_CYCLES:
-            raise ValueError(
-                f"capture_trace requires max_cycles <= {MAX_TRACE_CYCLES}"
-            )
+        # Central validation keeps this endpoint aligned with /api/run,
+        # including boolean/type checks and the stricter trace budget.
         return self.advance(
             max_cycles=max_cycles,
             capture_trace=capture_trace,
@@ -137,7 +126,8 @@ class DebugSessionManager:
         if not isinstance(max_sessions, int) or isinstance(max_sessions, bool) \
                 or max_sessions < 1:
             raise ValueError("max_sessions must be a positive integer")
-        if not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) \
+                or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
         self.max_sessions = max_sessions
         self.ttl_seconds = ttl_seconds
