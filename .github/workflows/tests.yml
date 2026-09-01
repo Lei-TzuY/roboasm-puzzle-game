@@ -27,6 +27,7 @@ jobs:
           python scratch/test_optimizer.py
           python scratch/test_jit.py
           python scratch/test_ai_solver.py
+          python scratch/test_level.py
           python scratch/test_vm_runtime.py
           python scratch/test_runtime_api.py
           python scratch/test_cli_compiler.py

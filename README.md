@@ -44,6 +44,8 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 - **Authoritative Headless Runtime (`runtime_api.py`, `/api/run`)**:
   - Reuses the Python lexer, assembler, level loader, and VM as a single canonical execution path.
   - Returns win state, score metrics, bytecode metadata, faults, final VM snapshot, and optional debugger trace.
+  - Mirrors the Web IDE optimizer option and exposes whether the returned bytecode is optimized.
+  - Resolves editor `#include` directives from the Web IDE/project source root, matching `/api/assemble` behavior.
   - Enforces bounded execution and confines HTTP level selection to bundled JSON levels.
 
 - **Rich Grid Mechanics**:
@@ -56,6 +58,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Web Audio API 8-Bit Retro Sound Synthesizer (`🔊 Sound: ON / OFF`).
   - Line Breakpoints (`●`), Time-Travel Step Back (`⏪ Step Back`), Code Auto-Formatter (`🧹 Format`).
   - **Server Verify** runs the editor source through the authoritative Python assembler + VM and reports PASS/faults independently of the browser VM.
+  - Server Verify mirrors the IDE **Optimize** checkbox so bytecode size/cycle comparisons are made in the same compile mode.
   - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
   - **Python Trace** captures bounded cycle-by-cycle snapshots with a scrubber for robots, registers, RAM, outboxes, and IPC state.
   - 3-Star Efficiency Rating System (Speed Star ⚡, Size Star 📜, Win Star 🏆).
