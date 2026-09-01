@@ -50,5 +50,6 @@ jobs:
           python scratch/test_vm_runtime.py
           python scratch/test_runtime_api.py
           python scratch/test_debug_sessions.py
+          python scratch/test_debug_expressions.py
           python scratch/test_debug_breakpoints.py
           python scratch/test_cli_compiler.py

@@ -6,6 +6,11 @@ import secrets
 import threading
 import time
 
+from debug_expressions import (
+    DebugExpressionError,
+    compile_debug_expression,
+    evaluate_debug_expression,
+)
 from runtime_api import prepare_level_execution, validate_run_options
 
 MAX_DEBUG_SESSIONS = 32
@@ -35,6 +40,8 @@ class DebugSession:
         self.optimize = optimize
         self.history_limit = history_limit
         self._history = deque(maxlen=history_limit)
+        self._embedded_conditional_breakpoints = None
+        self._embedded_watchpoints = None
         (
             self.level,
             self.assembler,
@@ -105,12 +112,38 @@ class DebugSession:
     def _remember_checkpoint(self):
         self._history.append(self.vm.snapshot())
 
+    def _validate_robot_id(self, robot_id, field_name):
+        if not isinstance(robot_id, int) or isinstance(robot_id, bool):
+            raise ValueError(f"{field_name} must be an integer")
+        if robot_id < 0 or robot_id >= len(self.vm.robots):
+            raise ValueError(f"{field_name} does not reference an active robot")
+        return robot_id
+
     def _normalize_breakpoints(self, breakpoint_lines, breakpoint_robot_id):
+        self._embedded_conditional_breakpoints = None
+        self._embedded_watchpoints = None
+        if isinstance(breakpoint_lines, dict):
+            unknown = set(breakpoint_lines) - {
+                'lines', 'conditional_breakpoints', 'watchpoints'
+            }
+            if unknown:
+                raise ValueError(
+                    'breakpoint_lines stop spec contains unknown fields: '
+                    + ', '.join(sorted(unknown))
+                )
+            self._embedded_conditional_breakpoints = breakpoint_lines.get(
+                'conditional_breakpoints'
+            )
+            self._embedded_watchpoints = breakpoint_lines.get('watchpoints')
+            breakpoint_lines = breakpoint_lines.get('lines')
+
         if breakpoint_lines is None:
             lines = set()
         else:
             if not isinstance(breakpoint_lines, (list, tuple, set)):
-                raise ValueError("breakpoint_lines must be an array of positive integers")
+                raise ValueError(
+                    "breakpoint_lines must be an array of positive integers or a stop spec object"
+                )
             lines = set()
             for line in breakpoint_lines:
                 if not isinstance(line, int) or isinstance(line, bool) or line < 1:
@@ -119,30 +152,199 @@ class DebugSession:
                     )
                 lines.add(line)
 
-        if not isinstance(breakpoint_robot_id, int) \
-                or isinstance(breakpoint_robot_id, bool):
-            raise ValueError("breakpoint_robot_id must be an integer")
-        if breakpoint_robot_id < 0 or breakpoint_robot_id >= len(self.vm.robots):
-            raise ValueError("breakpoint_robot_id does not reference an active robot")
-        return lines, breakpoint_robot_id
+        return lines, self._validate_robot_id(
+            breakpoint_robot_id,
+            'breakpoint_robot_id',
+        )
 
-    def _current_breakpoint(self, breakpoint_lines, breakpoint_robot_id):
-        """Return breakpoint metadata if the selected robot is paused before a line."""
-        if self.vm.cycles <= 0 or not breakpoint_lines:
-            return None
-        robot = self.vm.robots[breakpoint_robot_id]
+    def _normalize_conditional_breakpoints(
+        self,
+        conditional_breakpoints,
+        default_robot_id,
+    ):
+        if conditional_breakpoints is None:
+            conditional_breakpoints = self._embedded_conditional_breakpoints
+        if conditional_breakpoints is None:
+            return []
+        if not isinstance(conditional_breakpoints, (list, tuple)):
+            raise ValueError("conditional_breakpoints must be an array")
+
+        normalized = []
+        for index, entry in enumerate(conditional_breakpoints):
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"conditional_breakpoints[{index}] must be an object"
+                )
+            line_num = entry.get('line_num')
+            if not isinstance(line_num, int) or isinstance(line_num, bool) \
+                    or line_num < 1:
+                raise ValueError(
+                    f"conditional_breakpoints[{index}].line_num must be a positive integer"
+                )
+            condition = entry.get('condition')
+            try:
+                compiled = compile_debug_expression(condition)
+            except DebugExpressionError as exc:
+                raise ValueError(
+                    f"conditional_breakpoints[{index}]: {exc}"
+                ) from exc
+            robot_id = self._validate_robot_id(
+                entry.get('robot_id', default_robot_id),
+                f"conditional_breakpoints[{index}].robot_id",
+            )
+            normalized.append({
+                'line_num': line_num,
+                'condition': condition.strip(),
+                'robot_id': robot_id,
+                '_compiled': compiled,
+            })
+        return normalized
+
+    def _normalize_watchpoints(self, watchpoints, default_robot_id):
+        if watchpoints is None:
+            watchpoints = self._embedded_watchpoints
+        if watchpoints is None:
+            return []
+        if not isinstance(watchpoints, (list, tuple)):
+            raise ValueError("watchpoints must be an array")
+
+        normalized = []
+        for index, entry in enumerate(watchpoints):
+            if not isinstance(entry, dict):
+                raise ValueError(f"watchpoints[{index}] must be an object")
+            kind = entry.get('kind')
+            if kind == 'register':
+                name = entry.get('name')
+                if not isinstance(name, str) or name.upper() not in {
+                    'R0', 'R1', 'R2', 'R3'
+                }:
+                    raise ValueError(
+                        f"watchpoints[{index}].name must be R0, R1, R2, or R3"
+                    )
+                robot_id = self._validate_robot_id(
+                    entry.get('robot_id', default_robot_id),
+                    f"watchpoints[{index}].robot_id",
+                )
+                normalized.append({
+                    'kind': 'register',
+                    'robot_id': robot_id,
+                    'name': name.upper(),
+                })
+            elif kind == 'ram':
+                address = entry.get('address')
+                if not isinstance(address, int) or isinstance(address, bool):
+                    raise ValueError(
+                        f"watchpoints[{index}].address must be an integer"
+                    )
+                normalized.append({
+                    'kind': 'ram',
+                    'address': address,
+                })
+            else:
+                raise ValueError(
+                    f"watchpoints[{index}].kind must be 'register' or 'ram'"
+                )
+        return normalized
+
+    def _debug_context(self, robot_id):
+        robot = self.vm.robots[robot_id]
+        return {
+            'R0': robot.registers.get('R0', 0),
+            'R1': robot.registers.get('R1', 0),
+            'R2': robot.registers.get('R2', 0),
+            'R3': robot.registers.get('R3', 0),
+            'INV': robot.inventory,
+            'X': robot.x,
+            'Y': robot.y,
+            'PC': robot.pc,
+            'CYCLES': self.vm.cycles,
+            'ZERO': bool(robot.flags.get('ZERO', False)),
+            'NEGATIVE': bool(robot.flags.get('NEGATIVE', False)),
+            'RAM': self.vm.shared_ram,
+        }
+
+    def _conditional_breakpoint_hit(self, entry):
+        robot = self.vm.robots[entry['robot_id']]
         if robot.halted or robot.pc < 0 or robot.pc >= len(self.instructions):
             return None
         instruction = self.instructions[robot.pc]
-        line_num = instruction.get('line_num')
-        if line_num not in breakpoint_lines:
+        if instruction.get('line_num') != entry['line_num']:
+            return None
+        try:
+            matched = bool(evaluate_debug_expression(
+                entry['_compiled'],
+                self._debug_context(entry['robot_id']),
+            ))
+        except DebugExpressionError as exc:
+            raise ValueError(str(exc)) from exc
+        if not matched:
             return None
         return {
-            'robot_id': breakpoint_robot_id,
+            'kind': 'conditional',
+            'robot_id': entry['robot_id'],
             'pc': robot.pc,
-            'line_num': line_num,
+            'line_num': entry['line_num'],
+            'condition': entry['condition'],
             'cycle': self.vm.cycles,
         }
+
+    def _current_breakpoint(
+        self,
+        breakpoint_lines,
+        breakpoint_robot_id,
+        conditional_breakpoints,
+    ):
+        """Return metadata when execution is paused before a source line."""
+        # Keep legacy IDE behavior: Run does not immediately stop at cycle zero.
+        if self.vm.cycles <= 0:
+            return None
+
+        robot = self.vm.robots[breakpoint_robot_id]
+        if not robot.halted and 0 <= robot.pc < len(self.instructions):
+            instruction = self.instructions[robot.pc]
+            line_num = instruction.get('line_num')
+            if line_num in breakpoint_lines:
+                return {
+                    'kind': 'line',
+                    'robot_id': breakpoint_robot_id,
+                    'pc': robot.pc,
+                    'line_num': line_num,
+                    'cycle': self.vm.cycles,
+                }
+
+        for entry in conditional_breakpoints:
+            hit = self._conditional_breakpoint_hit(entry)
+            if hit is not None:
+                return hit
+        return None
+
+    def _sample_watchpoint(self, watchpoint):
+        if watchpoint['kind'] == 'register':
+            robot = self.vm.robots[watchpoint['robot_id']]
+            return {
+                'exists': True,
+                'value': deepcopy(robot.registers.get(watchpoint['name'], 0)),
+            }
+        address = watchpoint['address']
+        return {
+            'exists': address in self.vm.shared_ram,
+            'value': deepcopy(self.vm.shared_ram.get(address)),
+        }
+
+    def _changed_watchpoint(self, watchpoints, before_values):
+        for watchpoint, before in zip(watchpoints, before_values):
+            after = self._sample_watchpoint(watchpoint)
+            if before == after:
+                continue
+            return {
+                **watchpoint,
+                'old_exists': before['exists'],
+                'old_value': before['value'],
+                'new_exists': after['exists'],
+                'new_value': after['value'],
+                'cycle': self.vm.cycles,
+            }
+        return None
 
     def snapshot(self):
         """Return the current persistent session state and compile metadata."""
@@ -171,6 +373,8 @@ class DebugSession:
             'stopped_by_condition': bool(won),
             'stopped_by_breakpoint': False,
             'breakpoint': None,
+            'stopped_by_watchpoint': False,
+            'watchpoint': None,
             'limit_reached': False,
             'faults': deepcopy(self.vm.faults),
         }
@@ -184,8 +388,10 @@ class DebugSession:
         capture_trace=False,
         breakpoint_lines=None,
         breakpoint_robot_id=0,
+        conditional_breakpoints=None,
+        watchpoints=None,
     ):
-        """Advance this VM, checkpointing cycles and optionally stopping before a breakpoint."""
+        """Advance this VM until terminal, breakpoint, watchpoint, or budget."""
         validate_run_options(
             max_cycles=max_cycles,
             capture_trace=capture_trace,
@@ -195,6 +401,15 @@ class DebugSession:
             breakpoint_lines,
             breakpoint_robot_id,
         )
+        conditional_breakpoints = self._normalize_conditional_breakpoints(
+            conditional_breakpoints,
+            breakpoint_robot_id,
+        )
+        watchpoints = self._normalize_watchpoints(
+            watchpoints,
+            breakpoint_robot_id,
+        )
+
         won, _ = self._win_status()
         if won or self.vm.halted:
             execution = self._terminal_execution(capture_trace=capture_trace)
@@ -206,26 +421,39 @@ class DebugSession:
         start_cycles = self.vm.cycles
         stopped_by_condition = False
         breakpoint_hit = None
+        watchpoint_hit = None
         trace = [self.vm.snapshot()] if capture_trace else None
 
         while not self.vm.halted and self.vm.cycles - start_cycles < max_cycles:
             breakpoint_hit = self._current_breakpoint(
                 breakpoint_lines,
                 breakpoint_robot_id,
+                conditional_breakpoints,
             )
             if breakpoint_hit is not None:
                 break
 
+            before_values = [
+                self._sample_watchpoint(watchpoint)
+                for watchpoint in watchpoints
+            ]
             self._remember_checkpoint()
             self.vm.step()
             if capture_trace:
                 trace.append(self.vm.snapshot())
+
+            watchpoint_hit = self._changed_watchpoint(
+                watchpoints,
+                before_values,
+            )
             if self._win_status()[0]:
                 stopped_by_condition = True
+            if watchpoint_hit is not None or stopped_by_condition:
                 break
 
         executed = self.vm.cycles - start_cycles
         stopped_by_breakpoint = breakpoint_hit is not None
+        stopped_by_watchpoint = watchpoint_hit is not None
         execution = {
             'cycles_executed': executed,
             'total_cycles': self.vm.cycles,
@@ -233,10 +461,13 @@ class DebugSession:
             'stopped_by_condition': stopped_by_condition,
             'stopped_by_breakpoint': stopped_by_breakpoint,
             'breakpoint': breakpoint_hit,
+            'stopped_by_watchpoint': stopped_by_watchpoint,
+            'watchpoint': watchpoint_hit,
             'limit_reached': (
                 not self.vm.halted
                 and not stopped_by_condition
                 and not stopped_by_breakpoint
+                and not stopped_by_watchpoint
                 and executed >= max_cycles
             ),
             'faults': deepcopy(self.vm.faults),
@@ -297,6 +528,8 @@ class DebugSession:
         capture_trace=False,
         breakpoint_lines=None,
         breakpoint_robot_id=0,
+        conditional_breakpoints=None,
+        watchpoints=None,
     ):
         # Central validation keeps this endpoint aligned with /api/run,
         # including boolean/type checks and the stricter trace budget.
@@ -305,6 +538,8 @@ class DebugSession:
             capture_trace=capture_trace,
             breakpoint_lines=breakpoint_lines,
             breakpoint_robot_id=breakpoint_robot_id,
+            conditional_breakpoints=conditional_breakpoints,
+            watchpoints=watchpoints,
         )
 
 
