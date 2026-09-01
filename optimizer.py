@@ -1,111 +1,197 @@
-import re
+CONTROL_FLOW_OPCODES = {'JMP', 'JEQ', 'JNE', 'JLT', 'JGT', 'CALL'}
+CONDITIONAL_JUMPS = {'JEQ', 'JNE', 'JLT', 'JGT'}
+
 
 class Optimizer:
-    """
-    Assembly Code AST Optimizer Pass for RoboASM.
-    Performs optimization passes:
-    1. Constant Folding (e.g. MOV 5 R0 + ADD 3 R0 -> MOV 8 R0)
-    2. Redundant Jump Stripping (JMP label when label is right next line)
-    3. Dead Code Elimination (instructions unreachable after JMP or HLT without incoming label target)
-    4. Nop Removal
+    """Control-flow-safe optimization passes for resolved RoboASM bytecode.
+
+    Every pass that changes instruction indexes rebuilds numeric branch/call
+    targets and label indexes. Constant folding is deliberately blocked across
+    a secondary instruction that is itself an entry target.
     """
 
     def __init__(self, instructions, labels=None):
         self.instructions = instructions
-        self.labels = labels or {}
+        self.labels = dict(labels or {})
+
+    @staticmethod
+    def _copy_instruction(inst):
+        copied = dict(inst)
+        copied['args'] = list(inst.get('args', []))
+        return copied
 
     def optimize(self):
-        insts = [dict(i) for i in self.instructions]
-        insts = self._remove_nops(insts)
-        insts = self._constant_folding(insts)
-        insts = self._remove_redundant_jumps(insts)
-        insts = self._remove_dead_code(insts)
+        insts = [self._copy_instruction(i) for i in self.instructions]
+        labels = dict(self.labels)
+
+        insts, labels = self._remove_nops(insts, labels)
+        insts, labels = self._constant_folding(insts, labels)
+        insts, labels = self._remove_redundant_jumps(insts, labels)
+        insts, labels = self._remove_dead_code(insts, labels)
+
+        self.labels = labels
         return insts
 
-    def _remove_nops(self, insts):
-        return [i for i in insts if i['opcode'] != 'NOP']
+    @staticmethod
+    def _entry_targets(insts, labels):
+        targets = {
+            value for value in labels.values()
+            if isinstance(value, int) and 0 <= value <= len(insts)
+        }
+        for inst in insts:
+            if inst.get('opcode') not in CONTROL_FLOW_OPCODES:
+                continue
+            args = inst.get('args', [])
+            if args and isinstance(args[0], int) and 0 <= args[0] <= len(insts):
+                targets.add(args[0])
+        return targets
 
-    def _constant_folding(self, insts):
+    def _compact(self, insts, labels, entries):
+        """Compact instructions and remap all index-bearing metadata.
+
+        ``entries`` contains ``(old_indices, instruction)`` pairs. Removed
+        indexes map to the next surviving instruction (or program end), which
+        is semantics-preserving for removed NOPs/redundant jumps/unreachable
+        code. Folding may represent two old indexes with one instruction, but
+        the second index is never allowed to be an entry target.
         """
-        Fold constant MOV followed by arithmetic operations.
-        Example: MOV 5 R0 followed by ADD 3 R0 -> MOV 8 R0
-        """
-        optimized = []
+        old_count = len(insts)
+        direct = {}
+        for new_index, (old_indices, _) in enumerate(entries):
+            for old_index in old_indices:
+                direct[old_index] = new_index
+
+        index_map = {old_count: len(entries)}
+        next_index = len(entries)
+        for old_index in range(old_count - 1, -1, -1):
+            if old_index in direct:
+                next_index = direct[old_index]
+            index_map[old_index] = next_index
+
+        rebuilt = []
+        for _, inst in entries:
+            copied = self._copy_instruction(inst)
+            if copied.get('opcode') in CONTROL_FLOW_OPCODES:
+                args = copied.get('args', [])
+                if args and isinstance(args[0], int) and args[0] in index_map:
+                    args[0] = index_map[args[0]]
+            rebuilt.append(copied)
+
+        rebuilt_labels = {
+            name: index_map.get(value, value)
+            for name, value in labels.items()
+        }
+        return rebuilt, rebuilt_labels
+
+    def _remove_nops(self, insts, labels):
+        entries = [
+            ((idx,), inst)
+            for idx, inst in enumerate(insts)
+            if inst.get('opcode') not in ('NOP', 'NOOP')
+        ]
+        return self._compact(insts, labels, entries)
+
+    def _constant_folding(self, insts, labels):
+        protected = self._entry_targets(insts, labels)
+        entries = []
         i = 0
+
         while i < len(insts):
             curr = insts[i]
-            if i + 1 < len(insts):
+            if i + 1 < len(insts) and (i + 1) not in protected:
                 nxt = insts[i + 1]
-                # Check MOV imm reg followed by ADD imm reg (same reg)
-                if curr['opcode'] == 'MOV' and len(curr['args']) == 2:
+                if curr.get('opcode') == 'MOV' and len(curr.get('args', [])) == 2:
                     val1, reg1 = curr['args']
-                    if isinstance(val1, int) and isinstance(reg1, str) and reg1.startswith('R'):
-                        if nxt['opcode'] == 'ADD' and len(nxt['args']) == 2:
+                    if isinstance(val1, int) and not isinstance(val1, bool) \
+                            and isinstance(reg1, str) and reg1.startswith('R'):
+                        if nxt.get('opcode') in ('ADD', 'SUB', 'MUL') \
+                                and len(nxt.get('args', [])) == 2:
                             val2, reg2 = nxt['args']
-                            if isinstance(val2, int) and reg2 == reg1:
-                                folded = dict(curr)
-                                folded['args'] = [val1 + val2, reg1]
-                                optimized.append(folded)
+                            if isinstance(val2, int) and not isinstance(val2, bool) \
+                                    and reg2 == reg1:
+                                if nxt['opcode'] == 'ADD':
+                                    value = val1 + val2
+                                elif nxt['opcode'] == 'SUB':
+                                    value = val1 - val2
+                                else:
+                                    value = val1 * val2
+                                folded = self._copy_instruction(curr)
+                                folded['args'] = [value, reg1]
+                                entries.append(((i, i + 1), folded))
                                 i += 2
                                 continue
-                        elif nxt['opcode'] == 'SUB' and len(nxt['args']) == 2:
-                            val2, reg2 = nxt['args']
-                            if isinstance(val2, int) and reg2 == reg1:
-                                folded = dict(curr)
-                                folded['args'] = [val1 - val2, reg1]
-                                optimized.append(folded)
-                                i += 2
-                                continue
-                        elif nxt['opcode'] == 'MUL' and len(nxt['args']) == 2:
-                            val2, reg2 = nxt['args']
-                            if isinstance(val2, int) and reg2 == reg1:
-                                folded = dict(curr)
-                                folded['args'] = [val1 * val2, reg1]
-                                optimized.append(folded)
-                                i += 2
-                                continue
-            optimized.append(curr)
+
+            entries.append(((i,), curr))
             i += 1
-        return optimized
 
-    def _remove_redundant_jumps(self, insts):
-        """
-        Remove JMP N where N is the index of the immediately following instruction.
-        """
-        optimized = []
+        return self._compact(insts, labels, entries)
+
+    def _remove_redundant_jumps(self, insts, labels):
+        entries = []
         for idx, inst in enumerate(insts):
-            if inst['opcode'] == 'JMP' and len(inst['args']) == 1:
-                target = inst['args'][0]
-                if isinstance(target, int) and target == idx + 1:
-                    # Skip redundant jump to next line
-                    continue
-            optimized.append(inst)
-        return optimized
+            args = inst.get('args', [])
+            if inst.get('opcode') == 'JMP' and len(args) == 1 \
+                    and isinstance(args[0], int) and args[0] == idx + 1:
+                continue
+            entries.append(((idx,), inst))
+        return self._compact(insts, labels, entries)
 
-    def _remove_dead_code(self, insts):
-        """
-        Remove instructions following an unconditional JMP or HLT
-        if no known label jumps to them.
-        """
-        if not self.labels:
-            return insts
+    @staticmethod
+    def _successors(insts, idx):
+        inst = insts[idx]
+        opcode = inst.get('opcode')
+        args = inst.get('args', [])
+        next_index = idx + 1
+        successors = []
 
-        target_indices = set(self.labels.values())
-        optimized = []
-        unreachable = False
+        def add_target():
+            if args and isinstance(args[0], int) and 0 <= args[0] < len(insts):
+                successors.append(args[0])
 
-        for idx, inst in enumerate(insts):
-            if idx in target_indices:
-                unreachable = False
+        if opcode == 'JMP':
+            add_target()
+        elif opcode in CONDITIONAL_JUMPS:
+            add_target()
+            if next_index < len(insts):
+                successors.append(next_index)
+        elif opcode == 'CALL':
+            # The call target executes, and the following instruction is a
+            # potential continuation after RET.
+            add_target()
+            if next_index < len(insts):
+                successors.append(next_index)
+        elif opcode in ('HLT', 'RET'):
+            pass
+        elif next_index < len(insts):
+            successors.append(next_index)
 
-            if not unreachable:
-                optimized.append(inst)
+        return successors
 
-            if inst['opcode'] in ('JMP', 'HLT'):
-                # Check if target is not immediately next
-                if inst['opcode'] == 'JMP' and len(inst['args']) == 1 and inst['args'][0] == idx + 1:
-                    pass
-                else:
-                    unreachable = True
+    def _remove_dead_code(self, insts, labels):
+        if not insts:
+            return insts, labels
 
-        return optimized
+        # Preserve named entry points conservatively, even when no current
+        # instruction references them. This keeps optimized symbol/debug entry
+        # points usable while still deleting genuinely unreachable fallthrough.
+        roots = {0}
+        roots.update(
+            value for value in labels.values()
+            if isinstance(value, int) and 0 <= value < len(insts)
+        )
+
+        reachable = set()
+        pending = list(roots)
+        while pending:
+            idx = pending.pop()
+            if idx in reachable or not (0 <= idx < len(insts)):
+                continue
+            reachable.add(idx)
+            pending.extend(self._successors(insts, idx))
+
+        entries = [
+            ((idx,), inst)
+            for idx, inst in enumerate(insts)
+            if idx in reachable
+        ]
+        return self._compact(insts, labels, entries)
