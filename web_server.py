@@ -33,13 +33,16 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         # Suppress request logging to keep the console clean
         pass
 
-    def _send_json(self, status, payload):
-        body = json.dumps(payload).encode('utf-8')
+    def _send_bytes(self, status, body, content_type):
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload).encode('utf-8')
+        self._send_bytes(status, body, 'application/json; charset=utf-8')
 
     def _read_json(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -57,14 +60,34 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
 
-        # Serve index/web UI
+        # Serve index/web UI. The authority bridge is injected at serve time so
+        # the original standalone HTML remains usable when opened directly.
         if path in ('/', '/index.html', '/web_ui.html'):
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
             ui_path = os.path.join(ROOT_DIR, 'web_ui.html')
-            with open(ui_path, 'rb') as f:
-                self.wfile.write(f.read())
+            with open(ui_path, 'r', encoding='utf-8') as f:
+                html = f.read()
+            bridge_tag = '<script src="/web_authority.js"></script>'
+            if bridge_tag not in html:
+                if '</body>' in html:
+                    html = html.replace('</body>', f'{bridge_tag}\n</body>', 1)
+                else:
+                    html += f'\n{bridge_tag}\n'
+            self._send_bytes(
+                200,
+                html.encode('utf-8'),
+                'text/html; charset=utf-8',
+            )
+
+        # Browser-side bridge for Server Verify / Python Trace.
+        elif path == '/web_authority.js':
+            asset_path = os.path.join(ROOT_DIR, 'web_authority.js')
+            with open(asset_path, 'rb') as f:
+                body = f.read()
+            self._send_bytes(
+                200,
+                body,
+                'application/javascript; charset=utf-8',
+            )
 
         # API: Get all levels dynamically
         elif path == '/api/levels':
