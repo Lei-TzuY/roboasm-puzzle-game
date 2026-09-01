@@ -1,15 +1,20 @@
 (() => {
   'use strict';
 
-  // Compatibility fixes for the legacy browser VM.  Python remains the
+  // Compatibility fixes for the legacy browser VM. Python remains the
   // authoritative runtime; this shim keeps the interactive VM aligned while
   // the embedded runtime is incrementally retired/refactored.
-  if (typeof Robot === 'undefined' || !Robot.prototype || !Robot.prototype.step) {
-    throw new Error('RoboASM Web runtime compatibility shim could not find Robot.step');
+  if (typeof Robot === 'undefined' || !Robot.prototype || !Robot.prototype.step
+      || typeof assemble !== 'function' || typeof VM === 'undefined') {
+    throw new Error('RoboASM Web runtime compatibility shim could not find the embedded runtime');
   }
   if (Robot.prototype.step.__roboasmCompatWrapped) return;
 
   const originalStep = Robot.prototype.step;
+  const originalAssemble = assemble;
+  const OriginalVM = VM;
+  const DATA_DIRECTIVES = new Set(['db', '.db', 'dw', '.dw', 'array', '.array']);
+  const DATA_MEMORY_KEY = '__roboasmDataMemory';
 
   function opcodeOf(instruction) {
     return String((instruction && (instruction.opcode || instruction.op)) || '').toUpperCase();
@@ -23,6 +28,57 @@
     robot.halted = true;
     robot.error = message;
     throw new Error(message);
+  }
+
+  function parseDataValue(raw) {
+    const text = String(raw);
+    if (/^[+-]?\d+$/.test(text)) {
+      const value = Number(text);
+      if (!Number.isSafeInteger(value)) {
+        throw new Error(`Data value '${text}' exceeds the Web VM safe-integer range`);
+      }
+      return value;
+    }
+    return raw;
+  }
+
+  function compatibleAssemble(tokens, optimize = false) {
+    const filtered = [];
+    const dataMemory = {};
+    let address = 0;
+
+    for (const token of tokens) {
+      const parts = token && Array.isArray(token.parts) ? token.parts : [];
+      const first = parts.length ? String(parts[0]).toLowerCase() : '';
+      if (DATA_DIRECTIVES.has(first)) {
+        for (const raw of parts.slice(1)) {
+          dataMemory[address] = parseDataValue(raw);
+          address += 1;
+        }
+        continue;
+      }
+      filtered.push(token);
+    }
+
+    const instructions = originalAssemble(filtered, optimize);
+    Object.defineProperty(instructions, DATA_MEMORY_KEY, {
+      value: dataMemory,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    return instructions;
+  }
+
+  class CompatibleVM extends OriginalVM {
+    constructor(instructions, levelDef) {
+      super(instructions, levelDef);
+      const initialData = instructions && instructions[DATA_MEMORY_KEY]
+        ? instructions[DATA_MEMORY_KEY]
+        : {};
+      this.sharedRam = {...initialData};
+      for (const robot of this.robots) robot.ram = this.sharedRam;
+    }
   }
 
   function toExactBigInt(robot, value, context) {
@@ -87,7 +143,7 @@
     const args = argsOf(instruction);
 
     // The embedded implementation used `(this.x,this.y) in grid.inboxes`,
-    // which invokes JavaScript's comma operator and misses empty inboxes.  The
+    // which invokes JavaScript's comma operator and misses empty inboxes. The
     // Python VM treats a PICK from an empty inbox as a runtime fault.
     if (opcode === 'PICK') {
       const key = `${this.x},${this.y}`;
@@ -104,7 +160,7 @@
     }
 
     // JavaScript `%` uses truncating remainder while Python `%` follows floor
-    // division.  Match Python so negative operands have identical semantics.
+    // division. Match Python so negative operands have identical semantics.
     if (opcode === 'MOD') {
       const divisor = this.getVal(args[0]);
       const dividend = this.getVal(args[1]);
@@ -115,7 +171,7 @@
     }
 
     // Native JS bitwise operators silently coerce Numbers to signed 32-bit.
-    // RoboASM/Python integers do not.  BigInt preserves exact semantics for
+    // RoboASM/Python integers do not. BigInt preserves exact semantics for
     // every value the browser can still represent exactly as a Number.
     if (executeWideBitwise(this, opcode, args)) {
       this.pc += 1;
@@ -128,9 +184,18 @@
   compatibleStep.__roboasmCompatWrapped = true;
   compatibleStep.__roboasmOriginalStep = originalStep;
   Robot.prototype.step = compatibleStep;
+  assemble = compatibleAssemble;
+  VM = CompatibleVM;
 
   globalThis.ROBOASM_WEB_RUNTIME_COMPAT = Object.freeze({
-    version: 1,
-    fixes: ['empty-inbox-pick', 'noop-alias', 'python-modulo', 'wide-bitwise'],
+    version: 2,
+    fixes: [
+      'data-directives',
+      'initial-data-memory',
+      'empty-inbox-pick',
+      'noop-alias',
+      'python-modulo',
+      'wide-bitwise',
+    ],
   });
 })();

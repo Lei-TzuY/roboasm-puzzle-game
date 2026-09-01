@@ -151,6 +151,8 @@ class TestRunHTTPAPI(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(content_type, 'application/javascript')
+        self.assertIn('data-directives', source)
+        self.assertIn('initial-data-memory', source)
         self.assertIn('empty-inbox-pick', source)
         self.assertIn('python-modulo', source)
         self.assertIn('wide-bitwise', source)
