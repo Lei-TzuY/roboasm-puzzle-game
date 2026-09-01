@@ -12,6 +12,7 @@ from runtime_api import execute_level_code
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ASSET_NAMES = {
+    'web_optimizer.js',
     'web_preprocessor.js',
     'web_runtime_compat.js',
     'web_authority.js',
@@ -74,6 +75,7 @@ def build_web_runtime_bootstrap(html):
     ).replace('</', '<\\/')
     runtime_tags = [
         f'<script>globalThis.ROBOASM_WEB_INCLUDE_SOURCES={include_json};</script>',
+        '<script src="/web_optimizer.js"></script>',
         '<script src="/web_preprocessor.js"></script>',
         '<script src="/web_runtime_compat.js"></script>',
         '<script src="/web_authority.js"></script>',
@@ -89,7 +91,6 @@ def build_web_runtime_bootstrap(html):
 
 class RoboASMRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Suppress request logging to keep the console clean
         pass
 
     def _send_bytes(self, status, body, content_type):
@@ -119,32 +120,19 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
 
-        # Serve index/web UI. The server defers the embedded initUI() call so
-        # include sources, compiler parity, VM compatibility, and authority UI
-        # are installed before the first solution is compiled.
         if path in ('/', '/index.html', '/web_ui.html'):
             ui_path = os.path.join(ROOT_DIR, 'web_ui.html')
             with open(ui_path, 'r', encoding='utf-8') as f:
                 html = build_web_runtime_bootstrap(f.read())
-            self._send_bytes(
-                200,
-                html.encode('utf-8'),
-                'text/html; charset=utf-8',
-            )
+            self._send_bytes(200, html.encode('utf-8'), 'text/html; charset=utf-8')
 
-        # Browser-side compiler/runtime assets.
         elif path.startswith('/') and os.path.basename(path) in WEB_ASSET_NAMES:
             asset_name = os.path.basename(path)
             asset_path = os.path.join(ROOT_DIR, asset_name)
             with open(asset_path, 'rb') as f:
                 body = f.read()
-            self._send_bytes(
-                200,
-                body,
-                'application/javascript; charset=utf-8',
-            )
+            self._send_bytes(200, body, 'application/javascript; charset=utf-8')
 
-        # API: Get all levels dynamically
         elif path == '/api/levels':
             levels_dir = os.path.join(ROOT_DIR, 'levels')
             level_files = glob.glob(os.path.join(levels_dir, "*.json"))
@@ -154,7 +142,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                 return int(match.group()) if match else 0
 
             level_files.sort(key=get_lvl_num)
-
             levels = []
             for level_file in level_files:
                 try:
@@ -164,20 +151,16 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                         levels.append(level_data)
                 except Exception as exc:
                     print(f"Error loading level {level_file}: {exc}")
-
             self._send_json(200, levels)
 
-        # API: Load solution for a level
         elif path == '/api/solutions':
             level_file = query.get('level', [''])[0]
             if not level_file:
                 self._send_json(400, {'status': 'error', 'error': "Missing 'level' query parameter"})
                 return
-
             level_file = os.path.basename(level_file)
             sol_filename = level_file.replace('.json', '.asm')
             sol_path = os.path.join(ROOT_DIR, 'solutions', sol_filename)
-
             code = ""
             if os.path.exists(sol_path):
                 try:
@@ -185,10 +168,8 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                         code = f.read()
                 except Exception as exc:
                     print(f"Error reading solution {sol_path}: {exc}")
-
             self._send_json(200, {"code": code})
 
-        # API: Load scoreboard profile
         elif path == '/api/profile':
             profile_path = os.path.join(ROOT_DIR, 'profile.json')
             profile = {}
@@ -206,7 +187,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
 
-        # API: Assemble code via Python Assembler
         if path == '/api/assemble':
             try:
                 data = self._read_json()
@@ -216,12 +196,10 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("code must be a string")
                 if not isinstance(optimize, bool):
                     raise ValueError("optimize must be a boolean")
-
                 lexer = Lexer(code)
                 tokens = lexer.tokenize()
                 assembler = Assembler(tokens, base_dir=ROOT_DIR)
                 instructions = assembler.assemble(optimize=optimize)
-
                 self._send_json(200, {
                     "status": "success",
                     "optimized": optimize,
@@ -230,27 +208,18 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     "data_memory": assembler.data_memory,
                 })
             except (LexerError, AssemblerError) as exc:
-                self._send_json(400, {
-                    "status": "error",
-                    "error": str(exc),
-                    "line_num": getattr(exc, 'line_num', None),
-                })
+                self._send_json(400, {"status": "error", "error": str(exc), "line_num": getattr(exc, 'line_num', None)})
             except ValueError as exc:
                 self._send_json(400, {"status": "error", "error": str(exc)})
             except Exception as exc:
-                self._send_json(500, {
-                    "status": "error",
-                    "error": f"Internal assembly error: {exc}",
-                })
+                self._send_json(500, {"status": "error", "error": f"Internal assembly error: {exc}"})
 
-        # API: Execute code through the authoritative Python assembler + VM
         elif path == '/api/run':
             try:
                 data = self._read_json()
                 level_path = resolve_level_path(data.get('level'))
                 result = execute_level_code(
-                    data.get('code', ''),
-                    level_path,
+                    data.get('code', ''), level_path,
                     max_cycles=data.get('max_cycles', 1000),
                     capture_trace=data.get('capture_trace', False),
                     optimize=data.get('optimize', False),
@@ -260,39 +229,25 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
             except FileNotFoundError as exc:
                 self._send_json(404, {"status": "error", "error": str(exc)})
             except (LexerError, AssemblerError) as exc:
-                self._send_json(400, {
-                    "status": "error",
-                    "error": str(exc),
-                    "line_num": getattr(exc, 'line_num', None),
-                })
+                self._send_json(400, {"status": "error", "error": str(exc), "line_num": getattr(exc, 'line_num', None)})
             except ValueError as exc:
                 self._send_json(400, {"status": "error", "error": str(exc)})
             except Exception as exc:
-                self._send_json(500, {
-                    "status": "error",
-                    "error": f"Internal execution error: {exc}",
-                })
+                self._send_json(500, {"status": "error", "error": f"Internal execution error: {exc}"})
 
-        # API: Disassemble instructions to code
         elif path == '/api/disassemble':
             try:
                 data = self._read_json()
                 instructions = data.get('instructions', [])
                 symbol_table = data.get('symbol_table', {})
-
                 disasm = Disassembler(instructions, symbol_table)
                 code = disasm.disassemble()
-
-                self._send_json(200, {
-                    "status": "success",
-                    "code": code,
-                })
+                self._send_json(200, {"status": "success", "code": code})
             except ValueError as exc:
                 self._send_json(400, {"status": "error", "error": str(exc)})
             except Exception as exc:
                 self._send_json(500, {"status": "error", "error": str(exc)})
 
-        # API: Save solution for a level
         elif path == '/api/solutions':
             try:
                 data = self._read_json()
@@ -302,34 +257,28 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("Missing 'level' in request body")
                 if not isinstance(code, str):
                     raise ValueError("code must be a string")
-
                 level_file = os.path.basename(level_file)
                 sol_filename = level_file.replace('.json', '.asm')
                 solutions_dir = os.path.join(ROOT_DIR, 'solutions')
                 os.makedirs(solutions_dir, exist_ok=True)
-
                 sol_path = os.path.join(solutions_dir, sol_filename)
                 with open(sol_path, 'w', encoding='utf-8') as f:
                     f.write(code)
-
                 self._send_json(200, {"status": "success"})
             except ValueError as exc:
                 self._send_json(400, {"status": "error", "error": str(exc)})
             except Exception as exc:
                 self._send_json(500, {"status": "error", "error": f"Error saving solution: {exc}"})
 
-        # API: Save/Update personal best profile records
         elif path == '/api/profile':
             try:
                 import time
-
                 data = self._read_json()
                 level_file = data.get('level')
                 cycles = data.get('cycles')
                 size = data.get('size')
                 if not level_file or cycles is None or size is None:
                     raise ValueError("Missing required fields in request body")
-
                 level_file = os.path.basename(level_file)
                 profile_path = os.path.join(ROOT_DIR, 'profile.json')
                 profile = {}
@@ -339,7 +288,6 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                             profile = json.load(f)
                     except Exception:
                         pass
-
                 new_record = False
                 if level_file not in profile:
                     profile[level_file] = {'best_cycles': cycles, 'best_size': size, 'history': []}
@@ -353,23 +301,12 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
                     if size < profile[level_file]['best_size']:
                         profile[level_file]['best_size'] = size
                         new_record = True
-
-                profile[level_file]['history'].append({
-                    'timestamp': int(time.time()),
-                    'cycles': cycles,
-                    'size': size,
-                })
+                profile[level_file]['history'].append({'timestamp': int(time.time()), 'cycles': cycles, 'size': size})
                 if len(profile[level_file]['history']) > 30:
                     profile[level_file]['history'].pop(0)
-
                 with open(profile_path, 'w', encoding='utf-8') as f:
                     json.dump(profile, f, indent=2)
-
-                self._send_json(200, {
-                    "status": "success",
-                    "new_record": new_record,
-                    "profile": profile,
-                })
+                self._send_json(200, {"status": "success", "new_record": new_record, "profile": profile})
             except ValueError as exc:
                 self._send_json(400, {"status": "error", "error": str(exc)})
             except Exception as exc:
