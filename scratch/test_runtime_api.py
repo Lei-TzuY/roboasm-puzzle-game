@@ -81,6 +81,14 @@ class TestRunHTTPAPI(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=2)
 
+    def get_raw(self, path):
+        with urllib.request.urlopen(self.base_url + path, timeout=5) as response:
+            return (
+                response.status,
+                response.headers.get_content_type(),
+                response.read(),
+            )
+
     def post_json(self, path, payload):
         request = urllib.request.Request(
             self.base_url + path,
@@ -93,6 +101,26 @@ class TestRunHTTPAPI(unittest.TestCase):
                 return response.status, json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read().decode('utf-8'))
+
+    def test_web_ui_injects_authoritative_runtime_bridge(self):
+        status, content_type, body = self.get_raw('/')
+        html = body.decode('utf-8')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, 'text/html')
+        self.assertEqual(html.count('<script src="/web_authority.js"></script>'), 1)
+        self.assertIn('Visual Assembly IDE', html)
+
+    def test_authority_bridge_asset_is_served_as_javascript(self):
+        status, content_type, body = self.get_raw('/web_authority.js')
+        source = body.decode('utf-8')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, 'application/javascript')
+        self.assertIn('Server Verify', source)
+        self.assertIn("fetch('/api/run'", source)
+        self.assertIn('Runtime drift detected', source)
+        self.assertIn('capture_trace', source)
 
     def test_run_endpoint_executes_bundled_solution(self):
         solution_path = os.path.join(ROOT_DIR, 'solutions', 'level1.asm')
@@ -109,6 +137,21 @@ class TestRunHTTPAPI(unittest.TestCase):
         self.assertTrue(payload['won'])
         self.assertEqual(payload['status'], 'success')
         self.assertIn('state', payload)
+
+    def test_run_endpoint_returns_trace_for_debugger_bridge(self):
+        status, payload = self.post_json('/api/run', {
+            'level': 'level1.json',
+            'code': 'HLT',
+            'max_cycles': 2,
+            'capture_trace': True,
+        })
+
+        self.assertEqual(status, 200)
+        trace = payload['execution']['trace']
+        self.assertGreaterEqual(len(trace), 1)
+        self.assertEqual(trace[0]['cycles'], 0)
+        self.assertIn('robots', trace[0])
+        self.assertIn('grid', trace[0])
 
     def test_run_endpoint_returns_structured_compile_error(self):
         status, payload = self.post_json('/api/run', {
