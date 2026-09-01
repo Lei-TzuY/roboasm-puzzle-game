@@ -29,10 +29,14 @@ class TestControlFlowSafeOptimizer(unittest.TestCase):
             {'opcode': 'HLT', 'args': [], 'line_num': 4},
         ]
         result = Optimizer(insts).optimize()
-        self.assertEqual(result[0]['opcode'], 'JMP')
-        self.assertEqual(result[0]['args'], [1])
-        self.assertEqual(result[1]['opcode'], 'ADD')
-        self.assertEqual(result[1]['args'], [3, 'R0'])
+
+        # The MOV is unreachable and may disappear, and its JMP may then become
+        # redundant. The important invariant is that the targeted ADD must not
+        # be folded with the unreachable MOV into MOV 8 R0.
+        self.assertEqual(result, [
+            {'opcode': 'ADD', 'args': [3, 'R0'], 'line_num': 3},
+            {'opcode': 'HLT', 'args': [], 'line_num': 4},
+        ])
 
     def test_constant_folding_reaches_fixed_point_in_one_optimize_call(self):
         insts = [
@@ -86,11 +90,17 @@ class TestControlFlowSafeOptimizer(unittest.TestCase):
         self.assertEqual(assembler.labels['start'], 0)
         self.assertEqual(assembler.symbol_table['start']['value'], 0)
 
-    def test_trailing_exit_target_survives_compaction(self):
+    def test_trailing_exit_target_can_collapse_to_empty_program(self):
         code = 'NOP\nJMP done\nMOV 7 R0\ndone:\n'
-        instructions = Assembler(Lexer(code).tokenize()).assemble(optimize=True)
-        self.assertEqual(instructions[-1]['opcode'], 'JMP')
-        self.assertEqual(instructions[-1]['args'], [len(instructions)])
+        assembler = Assembler(Lexer(code).tokenize())
+        instructions = assembler.assemble(optimize=True)
+
+        # Jumping to EOF is equivalent to immediate program completion. Once
+        # dead code and the newly redundant exit jump are removed, the named
+        # EOF label must still point at the new program end (index zero).
+        self.assertEqual(instructions, [])
+        self.assertEqual(assembler.labels['done'], 0)
+        self.assertEqual(assembler.symbol_table['done']['value'], 0)
 
 
 if __name__ == '__main__':
