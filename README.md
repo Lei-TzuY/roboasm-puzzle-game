@@ -60,6 +60,13 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Resolves editor `#include` directives from the Web IDE/project source root, matching `/api/assemble` behavior.
   - Enforces bounded execution and confines HTTP level selection to bundled JSON levels.
 
+- **Persistent Authoritative Debug Sessions (`debug_sessions.py`, `/api/debug/sessions`)**:
+  - Creates one canonical Python VM and advances that same VM across later HTTP requests instead of replaying source from cycle zero.
+  - Supports session create/state/step/run/delete operations with optional incremental trace capture.
+  - Uses opaque session IDs, a 30-minute inactivity TTL, a 32-session cap, LRU eviction, and a thread-safe registry.
+  - Reuses the same compiler/level/VM preparation path as `/api/run`, so optimizer and include semantics stay authoritative.
+  - Session tests exercise real localhost HTTP lifecycle persistence, terminal no-op behavior, TTL refresh/expiration, LRU eviction, compile diagnostics, and budget validation.
+
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
   - Extracts the actual embedded JavaScript `lex` / `Grid` / `Robot` / `VM` implementation from `web_ui.html`, installs the same Web compiler/runtime layers used by the server, and executes it headlessly under Node.
   - Compares JavaScript and authoritative Python snapshots **cycle by cycle**, including robot state, flags, stacks, RAM, IPC, items, inboxes, outboxes, doors, cycles, and halt state.
@@ -101,6 +108,19 @@ python web_server.py
 
 Then open `http://127.0.0.1:8000` in your web browser. The server-served path injects the project include map, browser optimizer/preprocessor, VM compatibility layer, and authoritative-runtime bridge before initializing the IDE. Opening `web_ui.html` directly still works as the legacy standalone browser IDE, but the HTTP path is the canonical verified configuration.
 
+### Debug Session API
+
+Create a persistent debugger session with `POST /api/debug/sessions`, then use:
+
+```text
+GET    /api/debug/sessions/{session_id}
+POST   /api/debug/sessions/{session_id}/step   {"cycles": 1}
+POST   /api/debug/sessions/{session_id}/run    {"max_cycles": 1000, "capture_trace": false}
+DELETE /api/debug/sessions/{session_id}
+```
+
+A session keeps the same Python VM, grid, RAM, robot stacks/registers, IPC queue, and cycle counter alive between requests.
+
 ### Terminal UI & Compiler CLI
 
 ```powershell
@@ -139,6 +159,7 @@ python scratch\test_level.py
 python scratch\test_level_schema.py
 python scratch\test_vm_runtime.py
 python scratch\test_runtime_api.py
+python scratch\test_debug_sessions.py
 python scratch\test_cli_compiler.py
 node --check web_optimizer.js
 node --check web_preprocessor.js
