@@ -13,6 +13,7 @@ from debug_sessions import (
     DebugSession,
     DebugSessionManager,
     DebugSessionNotFound,
+    MAX_DEBUG_HISTORY,
     MAX_DEBUG_STEP_CYCLES,
 )
 from runtime_api import execute_level_code
@@ -37,10 +38,12 @@ class TestDebugSession(unittest.TestCase):
             source_base_dir=ROOT_DIR,
         )
         self.assertEqual(session.snapshot()['cycles'], 0)
+        self.assertEqual(session.snapshot()['history_depth'], 0)
 
         stepped = session.step(2)
         self.assertEqual(stepped['execution']['cycles_executed'], 2)
         self.assertEqual(stepped['cycles'], 2)
+        self.assertEqual(stepped['history_depth'], 2)
         self.assertFalse(stepped['won'])
 
         finished = session.run(max_cycles=200)
@@ -82,9 +85,100 @@ class TestDebugSession(unittest.TestCase):
         self.assertEqual(trace[-1]['cycles'], result['cycles'])
         self.assertLessEqual(result['execution']['cycles_executed'], 2)
 
+    def test_rewind_restores_exact_prior_state_and_can_run_forward_again(self):
+        session = DebugSession(
+            load_solution(),
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        at_two = session.step(2)['state']
+        session.step(2)
+
+        rewound = session.step(-2)
+        self.assertEqual(rewound['cycles'], 2)
+        self.assertEqual(rewound['state'], at_two)
+        self.assertEqual(rewound['rewind']['cycles_rewound'], 2)
+        self.assertEqual(rewound['history_depth'], 2)
+
+        finished = session.run(max_cycles=200)
+        self.assertTrue(finished['won'])
+        self.assertEqual(finished['cycles'], 8)
+
+    def test_rewind_from_terminal_clears_terminal_state_and_replays_same_finish(self):
+        session = DebugSession(
+            load_solution(),
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        first_finish = session.run(max_cycles=200)
+        self.assertTrue(first_finish['won'])
+
+        backed = session.step(-1)
+        self.assertEqual(backed['cycles'], 7)
+        self.assertFalse(backed['won'])
+        self.assertFalse(backed['terminal'])
+        self.assertFalse(backed['state']['halted'])
+
+        second_finish = session.step(1)
+        self.assertTrue(second_finish['won'])
+        self.assertEqual(second_finish['cycles'], first_finish['cycles'])
+        self.assertEqual(second_finish['state'], first_finish['state'])
+
+    def test_rewind_restores_faults_and_shared_ram_identity(self):
+        faulting = DebugSession('POP R0', LEVEL_PATH, source_base_dir=ROOT_DIR)
+        failed = faulting.step()
+        self.assertTrue(failed['terminal'])
+        self.assertEqual(len(failed['state']['faults']), 1)
+
+        restored = faulting.step(-1)
+        self.assertEqual(restored['cycles'], 0)
+        self.assertFalse(restored['terminal'])
+        self.assertEqual(restored['state']['faults'], [])
+        self.assertIs(faulting.vm.robots[0].ram, faulting.vm.shared_ram)
+
+        ram_session = DebugSession(
+            'MOV 0 R0\nMOV 7 R1\nSTORE R1 R0\nHLT',
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+        )
+        before_store = ram_session.step(2)['state']
+        stored = ram_session.step(1)
+        self.assertEqual(stored['state']['ram'].get(0), 7)
+        backed = ram_session.step(-1)
+        self.assertEqual(backed['state'], before_store)
+        self.assertIs(ram_session.vm.robots[0].ram, ram_session.vm.shared_ram)
+
+    def test_history_is_bounded_and_rewind_stops_at_oldest_retained_checkpoint(self):
+        session = DebugSession(
+            load_solution(),
+            LEVEL_PATH,
+            source_base_dir=ROOT_DIR,
+            history_limit=2,
+        )
+        session.step(4)
+        self.assertEqual(session.snapshot()['history_depth'], 2)
+        self.assertEqual(session.snapshot()['history_limit'], 2)
+
+        rewound = session.rewind(10)
+        self.assertEqual(rewound['rewind']['cycles_rewound'], 2)
+        self.assertEqual(rewound['cycles'], 2)
+        self.assertEqual(rewound['history_depth'], 0)
+        self.assertTrue(rewound['rewind']['at_history_start'])
+
+        no_more = session.rewind(1)
+        self.assertEqual(no_more['rewind']['cycles_rewound'], 0)
+        self.assertEqual(no_more['cycles'], 2)
+
+    def test_default_history_limit_is_bounded(self):
+        session = DebugSession('NOP\nJMP 0', LEVEL_PATH, source_base_dir=ROOT_DIR)
+        session.step(MAX_DEBUG_HISTORY + 20)
+        self.assertEqual(session.snapshot()['history_depth'], MAX_DEBUG_HISTORY)
+        self.assertEqual(session.snapshot()['history_limit'], MAX_DEBUG_HISTORY)
+
     def test_step_budget_validation(self):
         session = DebugSession('HLT', LEVEL_PATH, source_base_dir=ROOT_DIR)
-        for invalid in (0, MAX_DEBUG_STEP_CYCLES + 1, True, '1'):
+        for invalid in (0, MAX_DEBUG_STEP_CYCLES + 1,
+                        -(MAX_DEBUG_STEP_CYCLES + 1), True, '1'):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     session.step(invalid)
@@ -181,9 +275,10 @@ class TestDebugSessionHTTPAPI(unittest.TestCase):
         })
         self.assertEqual(status, 201)
         self.assertEqual(payload['cycles'], 0)
+        self.assertEqual(payload['history_depth'], 0)
         return payload['session_id']
 
-    def test_http_session_persists_state_across_step_run_get_delete(self):
+    def test_http_session_persists_state_across_step_back_run_get_delete(self):
         session_id = self.create_session()
 
         step_status, stepped = self.request_json(
@@ -192,6 +287,21 @@ class TestDebugSessionHTTPAPI(unittest.TestCase):
         self.assertEqual(step_status, 200)
         self.assertEqual(stepped['cycles'], 2)
         self.assertEqual(stepped['execution']['cycles_executed'], 2)
+        state_at_two = stepped['state']
+
+        step_status, stepped = self.request_json(
+            'POST', f'/api/debug/sessions/{session_id}/step', {'cycles': 2}
+        )
+        self.assertEqual(step_status, 200)
+        self.assertEqual(stepped['cycles'], 4)
+
+        back_status, backed = self.request_json(
+            'POST', f'/api/debug/sessions/{session_id}/step', {'cycles': -2}
+        )
+        self.assertEqual(back_status, 200)
+        self.assertEqual(backed['cycles'], 2)
+        self.assertEqual(backed['state'], state_at_two)
+        self.assertEqual(backed['rewind']['cycles_rewound'], 2)
 
         get_status, current = self.request_json(
             'GET', f'/api/debug/sessions/{session_id}'
@@ -206,6 +316,13 @@ class TestDebugSessionHTTPAPI(unittest.TestCase):
         self.assertEqual(run_status, 200)
         self.assertTrue(finished['won'])
         self.assertEqual(finished['cycles'], 8)
+
+        back_status, backed = self.request_json(
+            'POST', f'/api/debug/sessions/{session_id}/step', {'cycles': -1}
+        )
+        self.assertEqual(back_status, 200)
+        self.assertEqual(backed['cycles'], 7)
+        self.assertFalse(backed['terminal'])
 
         delete_status, deleted = self.request_json(
             'DELETE', f'/api/debug/sessions/{session_id}'
