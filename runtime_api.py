@@ -26,6 +26,50 @@ def validate_run_options(max_cycles=1000, capture_trace=False, optimize=False):
         )
 
 
+def prepare_level_execution(
+    code,
+    level_path,
+    optimize=False,
+    source_base_dir=None,
+):
+    """Compile *code* and construct the authoritative level + VM state.
+
+    This is the common preparation path for one-shot execution and persistent
+    debugger sessions. The returned tuple is ``(level, assembler,
+    instructions, vm)``. ``source_base_dir`` controls source-level include
+    resolution and defaults to the level file's directory.
+    """
+    if not isinstance(code, str):
+        raise ValueError("code must be a string")
+    if not isinstance(level_path, (str, os.PathLike)):
+        raise ValueError("level_path must be a filesystem path")
+    if source_base_dir is not None and not isinstance(
+        source_base_dir, (str, os.PathLike)
+    ):
+        raise ValueError("source_base_dir must be a filesystem path")
+    if not isinstance(optimize, bool):
+        raise ValueError("optimize must be a boolean")
+
+    level_path = os.path.abspath(os.fspath(level_path))
+    if source_base_dir is None:
+        source_base_dir = os.path.dirname(level_path)
+    else:
+        source_base_dir = os.path.abspath(os.fspath(source_base_dir))
+
+    level = Level(level_path)
+    grid = level.create_grid()
+    tokens = Lexer(code).tokenize()
+    assembler = Assembler(tokens, base_dir=source_base_dir)
+    instructions = assembler.assemble(optimize=optimize)
+    vm = VM(
+        instructions,
+        grid,
+        level.robots_config,
+        data_memory=assembler.data_memory,
+    )
+    return level, assembler, instructions, vm
+
+
 def execute_level_code(
     code,
     level_path,
@@ -41,35 +85,16 @@ def execute_level_code(
     compatibility; HTTP/editor callers should pass the directory that owns the
     source document (the repository root for the bundled Web IDE).
     """
-    if not isinstance(code, str):
-        raise ValueError("code must be a string")
-    if not isinstance(level_path, (str, os.PathLike)):
-        raise ValueError("level_path must be a filesystem path")
-    if source_base_dir is not None and not isinstance(source_base_dir, (str, os.PathLike)):
-        raise ValueError("source_base_dir must be a filesystem path")
     validate_run_options(
         max_cycles=max_cycles,
         capture_trace=capture_trace,
         optimize=optimize,
     )
-
-    level_path = os.path.abspath(os.fspath(level_path))
-    if source_base_dir is None:
-        source_base_dir = os.path.dirname(level_path)
-    else:
-        source_base_dir = os.path.abspath(os.fspath(source_base_dir))
-
-    level = Level(level_path)
-    grid = level.create_grid()
-
-    tokens = Lexer(code).tokenize()
-    assembler = Assembler(tokens, base_dir=source_base_dir)
-    instructions = assembler.assemble(optimize=optimize)
-    vm = VM(
-        instructions,
-        grid,
-        level.robots_config,
-        data_memory=assembler.data_memory,
+    level, assembler, instructions, vm = prepare_level_execution(
+        code,
+        level_path,
+        optimize=optimize,
+        source_base_dir=source_base_dir,
     )
 
     def stop_when(current_vm):
