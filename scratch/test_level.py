@@ -7,6 +7,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from level import Level
+from level_schema import LevelValidationError
 from runtime_api import execute_level_code
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -48,7 +49,7 @@ class TestLevelWinConditions(unittest.TestCase):
         }
         self.assertIn((0, 0), target_items)
 
-    def test_level_without_any_goal_does_not_auto_win(self):
+    def test_level_without_any_goal_is_rejected_at_load_time(self):
         definition = {
             'name': 'No Goal',
             'width': 2,
@@ -62,13 +63,13 @@ class TestLevelWinConditions(unittest.TestCase):
             path = f.name
 
         try:
-            level = Level(path)
-            won, message = level.check_win(DummyVM(), level.create_grid())
+            with self.assertRaises(LevelValidationError) as ctx:
+                Level(path)
         finally:
             os.unlink(path)
 
-        self.assertFalse(won)
-        self.assertEqual(message, 'No win condition configured.')
+        self.assertEqual(ctx.exception.path, '$')
+        self.assertIn('must define win_conditions', ctx.exception.message)
 
 
 if __name__ == '__main__':

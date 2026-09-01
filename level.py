@@ -1,11 +1,15 @@
 import json
+
 from grid import Grid
+from level_schema import validate_level_definition
 
 
 class Level:
     def __init__(self, filename):
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
+        validate_level_definition(data, source=filename)
 
         self.name = data.get('name', 'Unnamed Level')
         self.description = data.get('description', '')
