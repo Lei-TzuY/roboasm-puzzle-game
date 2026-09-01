@@ -40,6 +40,8 @@ class DebugSession:
         self.optimize = optimize
         self.history_limit = history_limit
         self._history = deque(maxlen=history_limit)
+        self._embedded_conditional_breakpoints = None
+        self._embedded_watchpoints = None
         (
             self.level,
             self.assembler,
@@ -118,11 +120,30 @@ class DebugSession:
         return robot_id
 
     def _normalize_breakpoints(self, breakpoint_lines, breakpoint_robot_id):
+        self._embedded_conditional_breakpoints = None
+        self._embedded_watchpoints = None
+        if isinstance(breakpoint_lines, dict):
+            unknown = set(breakpoint_lines) - {
+                'lines', 'conditional_breakpoints', 'watchpoints'
+            }
+            if unknown:
+                raise ValueError(
+                    'breakpoint_lines stop spec contains unknown fields: '
+                    + ', '.join(sorted(unknown))
+                )
+            self._embedded_conditional_breakpoints = breakpoint_lines.get(
+                'conditional_breakpoints'
+            )
+            self._embedded_watchpoints = breakpoint_lines.get('watchpoints')
+            breakpoint_lines = breakpoint_lines.get('lines')
+
         if breakpoint_lines is None:
             lines = set()
         else:
             if not isinstance(breakpoint_lines, (list, tuple, set)):
-                raise ValueError("breakpoint_lines must be an array of positive integers")
+                raise ValueError(
+                    "breakpoint_lines must be an array of positive integers or a stop spec object"
+                )
             lines = set()
             for line in breakpoint_lines:
                 if not isinstance(line, int) or isinstance(line, bool) or line < 1:
@@ -141,6 +162,8 @@ class DebugSession:
         conditional_breakpoints,
         default_robot_id,
     ):
+        if conditional_breakpoints is None:
+            conditional_breakpoints = self._embedded_conditional_breakpoints
         if conditional_breakpoints is None:
             return []
         if not isinstance(conditional_breakpoints, (list, tuple)):
@@ -178,6 +201,8 @@ class DebugSession:
         return normalized
 
     def _normalize_watchpoints(self, watchpoints, default_robot_id):
+        if watchpoints is None:
+            watchpoints = self._embedded_watchpoints
         if watchpoints is None:
             return []
         if not isinstance(watchpoints, (list, tuple)):
@@ -311,7 +336,7 @@ class DebugSession:
             after = self._sample_watchpoint(watchpoint)
             if before == after:
                 continue
-            hit = {
+            return {
                 **watchpoint,
                 'old_exists': before['exists'],
                 'old_value': before['value'],
@@ -319,7 +344,6 @@ class DebugSession:
                 'new_value': after['value'],
                 'cycle': self.vm.cycles,
             }
-            return hit
         return None
 
     def snapshot(self):
