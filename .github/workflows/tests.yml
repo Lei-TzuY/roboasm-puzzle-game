@@ -18,6 +18,8 @@ jobs:
       - run: python -m compileall -q .
       - name: Validate Web IDE JavaScript
         run: node --check web_authority.js
+      - name: Validate level definitions
+        run: python scratch/validate_levels.py
       - name: Validate all level solutions
         run: python scratch/test_all_solutions.py
       - name: Run component tests
@@ -28,6 +30,7 @@ jobs:
           python scratch/test_jit.py
           python scratch/test_ai_solver.py
           python scratch/test_level.py
+          python scratch/test_level_schema.py
           python scratch/test_vm_runtime.py
           python scratch/test_runtime_api.py
           python scratch/test_cli_compiler.py
