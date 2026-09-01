@@ -51,7 +51,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 - **Cross-Runtime Verification (`scratch/test_cross_runtime.py`)**:
   - Extracts the actual embedded JavaScript `lex` / `assemble` / `Grid` / `Robot` / `VM` implementation from `web_ui.html` and executes it headlessly under Node.
   - Compares JavaScript and authoritative Python snapshots **cycle by cycle**, including robot state, flags, stacks, RAM, IPC, items, inboxes, outboxes, doors, cycles, and halt state.
-  - Covers representative single- and multi-robot levels plus explicit JavaScript/Python edge cases such as `NOOP`, negative modulo, wide bitwise integers, and shift faults.
+  - Covers 19 bundled levels, including RAM/data-heavy Levels 18, 21, 22, 25, 26, 27, 31, and 33, plus explicit JavaScript/Python edge cases such as `NOOP`, negative modulo, wide bitwise integers, and shift faults.
   - Runs as a dedicated CI gate so semantic drift is detected at the first differing cycle.
 
 - **Validated Level Assets (`level_schema.py`)**:
@@ -71,7 +71,8 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Server Verify mirrors the IDE **Optimize** checkbox so bytecode size/cycle comparisons are made in the same compile mode.
   - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
   - **Python Trace** captures bounded cycle-by-cycle snapshots with a scrubber for robots, registers, RAM, outboxes, and IPC state.
-  - The server-served IDE loads `web_runtime_compat.js` before `web_authority.js` to align legacy browser semantics with Python for empty-inbox faults, the `NOOP` alias, Python-style modulo, and non-32-bit bitwise operations.
+  - The server-served IDE loads `web_runtime_compat.js` before `web_authority.js` to align legacy browser semantics with Python for `DB`/`DW`/`ARRAY` data memory, empty-inbox faults, the `NOOP` alias, Python-style modulo, and non-32-bit bitwise operations.
+  - Initial RAM produced by data directives is available to every Web robot from cycle 0 through the same shared-memory object used by `LOAD`/`STORE`.
   - 3-Star Efficiency Rating System (Speed Star ⚡, Size Star 📜, Win Star 🏆).
   - Real-time bytecode, RAM, Stack, and IPC queue inspector panels.
   - Interactive grid canvas rendering.
