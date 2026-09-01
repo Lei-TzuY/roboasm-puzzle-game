@@ -60,27 +60,33 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
 
-        # Serve index/web UI. The authority bridge is injected at serve time so
-        # the original standalone HTML remains usable when opened directly.
+        # Serve index/web UI. Runtime compatibility is loaded after the legacy
+        # embedded VM and before the authoritative verification/debug bridge.
         if path in ('/', '/index.html', '/web_ui.html'):
             ui_path = os.path.join(ROOT_DIR, 'web_ui.html')
             with open(ui_path, 'r', encoding='utf-8') as f:
                 html = f.read()
-            bridge_tag = '<script src="/web_authority.js"></script>'
-            if bridge_tag not in html:
+            runtime_tags = [
+                '<script src="/web_runtime_compat.js"></script>',
+                '<script src="/web_authority.js"></script>',
+            ]
+            missing_tags = [tag for tag in runtime_tags if tag not in html]
+            if missing_tags:
+                injected = '\n'.join(missing_tags)
                 if '</body>' in html:
-                    html = html.replace('</body>', f'{bridge_tag}\n</body>', 1)
+                    html = html.replace('</body>', f'{injected}\n</body>', 1)
                 else:
-                    html += f'\n{bridge_tag}\n'
+                    html += f'\n{injected}\n'
             self._send_bytes(
                 200,
                 html.encode('utf-8'),
                 'text/html; charset=utf-8',
             )
 
-        # Browser-side bridge for Server Verify / Python Trace.
-        elif path == '/web_authority.js':
-            asset_path = os.path.join(ROOT_DIR, 'web_authority.js')
+        # Browser-side runtime assets.
+        elif path in ('/web_runtime_compat.js', '/web_authority.js'):
+            asset_name = os.path.basename(path)
+            asset_path = os.path.join(ROOT_DIR, asset_name)
             with open(asset_path, 'rb') as f:
                 body = f.read()
             self._send_bytes(
