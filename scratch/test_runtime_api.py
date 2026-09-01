@@ -132,14 +132,29 @@ class TestRunHTTPAPI(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read().decode('utf-8'))
 
-    def test_web_ui_injects_authoritative_runtime_bridge(self):
+    def test_web_ui_injects_runtime_layers_in_order(self):
         status, content_type, body = self.get_raw('/')
         html = body.decode('utf-8')
+        compat_tag = '<script src="/web_runtime_compat.js"></script>'
+        authority_tag = '<script src="/web_authority.js"></script>'
 
         self.assertEqual(status, 200)
         self.assertEqual(content_type, 'text/html')
-        self.assertEqual(html.count('<script src="/web_authority.js"></script>'), 1)
+        self.assertEqual(html.count(compat_tag), 1)
+        self.assertEqual(html.count(authority_tag), 1)
+        self.assertLess(html.index(compat_tag), html.index(authority_tag))
         self.assertIn('Visual Assembly IDE', html)
+
+    def test_runtime_compat_asset_is_served_as_javascript(self):
+        status, content_type, body = self.get_raw('/web_runtime_compat.js')
+        source = body.decode('utf-8')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, 'application/javascript')
+        self.assertIn('empty-inbox-pick', source)
+        self.assertIn('python-modulo', source)
+        self.assertIn('wide-bitwise', source)
+        self.assertIn("opcode === 'NOOP'", source)
 
     def test_authority_bridge_asset_is_served_as_javascript(self):
         status, content_type, body = self.get_raw('/web_authority.js')
