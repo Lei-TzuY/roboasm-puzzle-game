@@ -8,6 +8,29 @@
     return {...inst, args: Array.isArray(inst.args) ? [...inst.args] : []};
   }
 
+  function sameInstructions(left, right) {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      const a = left[i];
+      const b = right[i];
+      if (a.opcode !== b.opcode || a.line_num !== b.line_num) return false;
+      if (a.args.length !== b.args.length) return false;
+      for (let j = 0; j < a.args.length; j += 1) {
+        if (a.args[j] !== b.args[j]) return false;
+      }
+    }
+    return true;
+  }
+
+  function sameLabels(left, right) {
+    const leftKeys = Object.keys(left || {}).sort();
+    const rightKeys = Object.keys(right || {}).sort();
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every((key, index) => (
+      key === rightKeys[index] && left[key] === right[key]
+    ));
+  }
+
   function entryTargets(insts, labels) {
     const targets = new Set();
     for (const value of Object.values(labels || {})) {
@@ -145,17 +168,31 @@
       instructions: instructions.map(cloneInstruction),
       labels: {...labels},
     };
-    state = removeNops(state.instructions, state.labels);
-    state = constantFold(state.instructions, state.labels);
-    state = removeRedundantJumps(state.instructions, state.labels);
-    state = removeDeadCode(state.instructions, state.labels);
-    return state;
+    const maxRounds = Math.max(1, 2 * state.instructions.length + 2);
+
+    for (let round = 0; round < maxRounds; round += 1) {
+      const beforeInstructions = state.instructions.map(cloneInstruction);
+      const beforeLabels = {...state.labels};
+
+      state = removeNops(state.instructions, state.labels);
+      state = constantFold(state.instructions, state.labels);
+      state = removeRedundantJumps(state.instructions, state.labels);
+      state = removeDeadCode(state.instructions, state.labels);
+
+      if (sameInstructions(beforeInstructions, state.instructions)
+          && sameLabels(beforeLabels, state.labels)) {
+        return state;
+      }
+    }
+
+    throw new Error(`Web optimizer did not converge after ${maxRounds} rounds`);
   }
 
   globalThis.optimizeRoboASM = optimizeRoboASM;
   globalThis.ROBOASM_WEB_OPTIMIZER = Object.freeze({
-    version: 1,
+    version: 2,
     passes: ['nop-removal', 'constant-folding', 'redundant-jump-removal', 'cfg-dead-code'],
     controlFlowSafe: true,
+    fixedPoint: true,
   });
 })();
