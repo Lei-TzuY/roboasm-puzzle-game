@@ -26,19 +26,22 @@ function loadEmbeddedRuntime() {
   };
   sandbox.globalThis = sandbox;
   nodeVm.createContext(sandbox);
-  nodeVm.runInContext(
-    `${runtimeSource}\nglobalThis.__roboasmRuntime = { lex, assemble, Grid, Robot, VM };`,
-    sandbox,
-    {filename: 'web_ui.runtime.js'},
-  );
+  nodeVm.runInContext(runtimeSource, sandbox, {filename: 'web_ui.runtime.js'});
 
-  // The recommended server-served IDE applies the same small compatibility
-  // layer before the authoritative-runtime UI bridge.  Load it here too so CI
+  // The recommended server-served IDE applies the same compatibility layer
+  // before the authoritative-runtime UI bridge. Load it here too so CI
   // exercises exactly that browser runtime composition rather than a test-only
   // copy of the VM.
   const compatSource = fs.readFileSync(WEB_COMPAT_PATH, 'utf8');
   nodeVm.runInContext(compatSource, sandbox, {filename: 'web_runtime_compat.js'});
 
+  // Capture bindings only after compatibility has had a chance to wrap/rebind
+  // assembler and VM constructors (for example, data-memory initialization).
+  nodeVm.runInContext(
+    'globalThis.__roboasmRuntime = { lex, assemble, Grid, Robot, VM };',
+    sandbox,
+    {filename: 'web_ui.runtime.export.js'},
+  );
   return sandbox.__roboasmRuntime;
 }
 
