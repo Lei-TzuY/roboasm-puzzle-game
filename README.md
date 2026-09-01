@@ -41,6 +41,11 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
   - Detached JSON-friendly debugger state through `VM.snapshot()`
   - Optional cycle-by-cycle execution traces through `VM.run(..., capture_trace=True)`
 
+- **Authoritative Headless Runtime (`runtime_api.py`, `/api/run`)**:
+  - Reuses the Python lexer, assembler, level loader, and VM as a single canonical execution path.
+  - Returns win state, score metrics, bytecode metadata, faults, final VM snapshot, and optional debugger trace.
+  - Enforces bounded execution and confines HTTP level selection to bundled JSON levels.
+
 - **Rich Grid Mechanics**:
   - Quantum Portals / Teleporters, Pressure Buttons, Lock Doors, Conveyor Belts, Shared RAM Atomic Mutex Locks, and Multi-Robot Parallel Execution.
 
@@ -50,6 +55,9 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 - **Interactive Web IDE & Audio-Visual Studio**:
   - Web Audio API 8-Bit Retro Sound Synthesizer (`🔊 Sound: ON / OFF`).
   - Line Breakpoints (`●`), Time-Travel Step Back (`⏪ Step Back`), Code Auto-Formatter (`🧹 Format`).
+  - **Server Verify** runs the editor source through the authoritative Python assembler + VM and reports PASS/faults independently of the browser VM.
+  - **JS ↔ Python differential check** compares terminal browser state with the authoritative server result and identifies drift by field.
+  - **Python Trace** captures bounded cycle-by-cycle snapshots with a scrubber for robots, registers, RAM, outboxes, and IPC state.
   - 3-Star Efficiency Rating System (Speed Star ⚡, Size Star 📜, Win Star 🏆).
   - Real-time bytecode, RAM, Stack, and IPC queue inspector panels.
   - Interactive grid canvas rendering.
@@ -62,7 +70,7 @@ A feature-rich programming puzzle game, AI program synthesizer, compiler optimiz
 python web_server.py
 ```
 
-Then open `http://127.0.0.1:8000` in your web browser.
+Then open `http://127.0.0.1:8000` in your web browser. When served through `web_server.py`, the IDE automatically loads the authoritative-runtime bridge; opening `web_ui.html` directly still works as the original standalone browser IDE.
 
 ### Terminal UI & Compiler CLI
 
@@ -80,7 +88,7 @@ Verify all 35 level solutions:
 python scratch\test_all_solutions.py
 ```
 
-Run unit test suites:
+Run unit and integration suites:
 
 ```powershell
 python scratch\test_assembler.py
@@ -89,5 +97,7 @@ python scratch\test_optimizer.py
 python scratch\test_jit.py
 python scratch\test_ai_solver.py
 python scratch\test_vm_runtime.py
+python scratch\test_runtime_api.py
 python scratch\test_cli_compiler.py
+node --check web_authority.js
 ```
