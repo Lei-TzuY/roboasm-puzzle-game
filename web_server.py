@@ -11,6 +11,11 @@ from lexer import Lexer, LexerError
 from runtime_api import execute_level_code
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_ASSET_NAMES = {
+    'web_preprocessor.js',
+    'web_runtime_compat.js',
+    'web_authority.js',
+}
 
 
 def resolve_level_path(level_file):
@@ -26,6 +31,60 @@ def resolve_level_path(level_file):
     if not os.path.isfile(level_path):
         raise FileNotFoundError(f"Level '{safe_name}' not found")
     return level_path
+
+
+def collect_web_include_sources():
+    """Return UTF-8 project-local assembly sources available to Web #include."""
+    sources = {}
+    skipped_dirs = {'.git', '__pycache__', '.pytest_cache'}
+
+    for dirpath, dirnames, filenames in os.walk(ROOT_DIR):
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in skipped_dirs and not name.startswith('.')
+        ]
+        for filename in filenames:
+            if not filename.lower().endswith('.asm'):
+                continue
+            absolute = os.path.join(dirpath, filename)
+            relative = os.path.relpath(absolute, ROOT_DIR).replace(os.sep, '/')
+            try:
+                with open(absolute, 'r', encoding='utf-8') as handle:
+                    sources[relative] = handle.read()
+            except (OSError, UnicodeError):
+                continue
+    return sources
+
+
+def build_web_runtime_bootstrap(html):
+    """Install compiler/runtime layers before the server-served IDE initializes."""
+    init_marker = '\ninitUI();\n</script>'
+    init_deferred = init_marker in html
+    if init_deferred:
+        html = html.replace(
+            init_marker,
+            '\nglobalThis.__ROBOASM_INIT_DEFERRED__ = true;\n</script>',
+            1,
+        )
+
+    include_json = json.dumps(
+        collect_web_include_sources(),
+        ensure_ascii=True,
+        separators=(',', ':'),
+    ).replace('</', '<\\/')
+    runtime_tags = [
+        f'<script>globalThis.ROBOASM_WEB_INCLUDE_SOURCES={include_json};</script>',
+        '<script src="/web_preprocessor.js"></script>',
+        '<script src="/web_runtime_compat.js"></script>',
+        '<script src="/web_authority.js"></script>',
+    ]
+    if init_deferred:
+        runtime_tags.append('<script>initUI();</script>')
+
+    injected = '\n'.join(runtime_tags)
+    if '</body>' in html:
+        return html.replace('</body>', f'{injected}\n</body>', 1)
+    return f'{html}\n{injected}\n'
 
 
 class RoboASMRequestHandler(BaseHTTPRequestHandler):
@@ -60,31 +119,21 @@ class RoboASMRequestHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
 
-        # Serve index/web UI. Runtime compatibility is loaded after the legacy
-        # embedded VM and before the authoritative verification/debug bridge.
+        # Serve index/web UI. The server defers the embedded initUI() call so
+        # include sources, compiler parity, VM compatibility, and authority UI
+        # are installed before the first solution is compiled.
         if path in ('/', '/index.html', '/web_ui.html'):
             ui_path = os.path.join(ROOT_DIR, 'web_ui.html')
             with open(ui_path, 'r', encoding='utf-8') as f:
-                html = f.read()
-            runtime_tags = [
-                '<script src="/web_runtime_compat.js"></script>',
-                '<script src="/web_authority.js"></script>',
-            ]
-            missing_tags = [tag for tag in runtime_tags if tag not in html]
-            if missing_tags:
-                injected = '\n'.join(missing_tags)
-                if '</body>' in html:
-                    html = html.replace('</body>', f'{injected}\n</body>', 1)
-                else:
-                    html += f'\n{injected}\n'
+                html = build_web_runtime_bootstrap(f.read())
             self._send_bytes(
                 200,
                 html.encode('utf-8'),
                 'text/html; charset=utf-8',
             )
 
-        # Browser-side runtime assets.
-        elif path in ('/web_runtime_compat.js', '/web_authority.js'):
+        # Browser-side compiler/runtime assets.
+        elif path.startswith('/') and os.path.basename(path) in WEB_ASSET_NAMES:
             asset_name = os.path.basename(path)
             asset_path = os.path.join(ROOT_DIR, asset_name)
             with open(asset_path, 'rb') as f:
