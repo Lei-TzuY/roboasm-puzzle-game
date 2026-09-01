@@ -14,7 +14,7 @@ _ALLOWED_NAMES = {
 }
 _ALLOWED_BINOPS = (
     ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod,
-    ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift,
+    ast.BitAnd, ast.BitOr, ast.BitXor,
 )
 _ALLOWED_UNARYOPS = (ast.Not, ast.USub, ast.UAdd, ast.Invert)
 _ALLOWED_BOOLOPS = (ast.And, ast.Or)
@@ -22,17 +22,26 @@ _ALLOWED_CMPOPS = (
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.Is, ast.IsNot,
 )
+_MAX_INTEGER_LITERAL = (1 << 63) - 1
+
+
+def _bounded_integer(value, label='integer literal'):
+    if abs(value) > _MAX_INTEGER_LITERAL:
+        raise DebugExpressionError(
+            f'{label} must fit in a signed 64-bit integer'
+        )
+    return value
 
 
 def _constant_int(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, int) \
             and not isinstance(node.value, bool):
-        return node.value
+        return _bounded_integer(node.value, 'RAM index')
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) \
             and isinstance(node.operand, ast.Constant) \
             and isinstance(node.operand.value, int) \
             and not isinstance(node.operand.value, bool):
-        return -node.operand.value
+        return _bounded_integer(-node.operand.value, 'RAM index')
     raise DebugExpressionError('RAM index must be an integer literal')
 
 
@@ -41,7 +50,10 @@ def _validate(node):
         _validate(node.body)
         return
     if isinstance(node, ast.Constant):
-        if node.value is None or isinstance(node.value, (bool, int)):
+        if node.value is None or isinstance(node.value, bool):
+            return
+        if isinstance(node.value, int):
+            _bounded_integer(node.value)
             return
         raise DebugExpressionError('Only integer, boolean, and None literals are allowed')
     if isinstance(node, ast.Name):
@@ -134,10 +146,6 @@ def _eval(node, context):
             return left | right
         if isinstance(node.op, ast.BitXor):
             return left ^ right
-        if isinstance(node.op, ast.LShift):
-            return left << right
-        if isinstance(node.op, ast.RShift):
-            return left >> right
     if isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
             result = True
